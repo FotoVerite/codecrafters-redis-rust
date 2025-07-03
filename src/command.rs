@@ -1,13 +1,13 @@
-use std::error::Error;
-
 use futures::io;
 
 use crate::resp::RespValue;
 
 #[derive(Debug)]
 pub enum RespCommand {
+    Get(String),
     Ping,
     Echo(String),
+    Set(String, Vec<u8>),
 }
 
 impl RespCommand {
@@ -15,6 +15,7 @@ impl RespCommand {
         match self {
             RespCommand::Ping => RespValue::SimpleString("PONG".into()),
             RespCommand::Echo(s) => RespValue::BulkString(Some(s.into_bytes())),
+            _ => RespValue::Error("-1".to_string()),
         }
     }
 }
@@ -42,10 +43,7 @@ impl Command {
                 };
                 args.push(s);
             }
-            return Ok(Self {
-                name,
-                args,
-            });
+            return Ok(Self { name, args });
         } else {
             invalid_data("Unexpected RespValue")?
         }
@@ -63,7 +61,12 @@ impl Command {
         };
         return match command.name.to_ascii_lowercase().as_str() {
             "ping" => Ok(RespCommand::Ping),
-            "echo" => Ok(RespCommand::Echo((command.args[0].clone()))),
+            "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
+            "get" => Ok(RespCommand::Get(command.args[0].clone())),
+            "set" => Ok(RespCommand::Set(
+                command.args[0].clone(),
+                command.args[1].clone().into_bytes(),
+            )),
 
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };

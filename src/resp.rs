@@ -150,7 +150,7 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::SimpleString(s) => write_line(dst, b'+', &s),
             RespValue::Error(e) => write_line(dst, b'-', &e),
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
-            RespValue::BulkString(c) => write_bulk_string(dst, &c.unwrap()),
+            RespValue::BulkString(c) => write_bulk_string(dst, c),
             RespValue::Array(s) => Ok(()),
         }
     }
@@ -163,10 +163,19 @@ fn write_line(dst: &mut BytesMut, prefix: u8, content: &str) -> Result<(), io::E
     Ok(())
 }
 
-fn write_bulk_string(dst: &mut BytesMut, content: &Vec<u8>) -> Result<(), io::Error> {
-    write_line(dst, b'$', content.len().to_string().as_str())?;
-    dst.extend_from_slice(content);
-    dst.extend_from_slice(b"\r\n");
-
+fn write_bulk_string(dst: &mut BytesMut, option: Option<Vec<u8>>) -> Result<(), io::Error> {
+ match option {
+        Some(data) => {
+            // Write: $<length>\r\n<data>\r\n
+            let len = data.len();
+            dst.extend_from_slice(format!("${}\r\n", len).as_bytes());
+            dst.extend_from_slice(&data);
+            dst.extend_from_slice(b"\r\n");
+        }
+        None => {
+            // Write: $-1\r\n
+            dst.extend_from_slice(b"$-1\r\n");
+        }
+    }
     Ok(())
 }
