@@ -2,42 +2,52 @@
 mod reader;
 
 use reader::Reader;
-use std::{
-    io::{BufReader, Result, Write},
-    net::{TcpListener, TcpStream},
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpListener,
+    },
 };
-fn main() {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
     //Uncomment this block to pass the first stage
 
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:6379").await?;
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut _stream) => {
-               let _ = parse_stream(_stream);
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
+    loop {
+        let (socket, addr) = listener.accept().await?;
+        println!("New connection from {}", addr);
+
+        // Spawn a new async task to handle the connection
+        tokio::spawn(async move {
+            let (reader, writer) = socket.into_split();
+            let reader = BufReader::new(reader);
+            let line = String::new();
+
+            let _ = async_parse_stream(reader, writer, line).await;
+
+            // Use `socket` to read/write asynchronously here
+        });
     }
 
-    fn parse_stream(_stream: TcpStream) -> Result<()> {
-        let mut reader = Reader::new(_stream);
+    async fn async_parse_stream(
+        mut reader: BufReader<OwnedReadHalf>,
+        mut writer: OwnedWriteHalf,
+        mut line: String,
+    ) -> std::io::Result<()> {
         loop {
-
-            if let Some(command) = reader.read_line()? {
-                if command.contains("PING") {
-                    reader.stream.get_mut().write_all(b"+PONG\r\n")?;
-                }
-            } else {
-                let n = reader.fill_buffer()?;
-                if n == 0 {
-                    break;
-                }
+            line.clear();
+            let bytes_read = reader.read_line(&mut line).await?;
+            if bytes_read == 0 {
+                // Connection closed
+                break;
+            }
+            if line.trim() == "PING" {
+                writer.write_all(b"+PONG\r\n").await?;
             }
         }
         Ok(())
