@@ -1,7 +1,4 @@
-#![allow(unused_imports)]
-mod reader;
 
-use reader::Reader;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{
