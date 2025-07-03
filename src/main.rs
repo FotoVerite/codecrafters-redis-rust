@@ -1,11 +1,16 @@
+mod command;
+mod resp;
 
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{
         tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener,
+        TcpListener, TcpStream,
     },
 };
+use tokio_util::codec::Framed;
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -21,32 +26,23 @@ async fn main() -> std::io::Result<()> {
 
         // Spawn a new async task to handle the connection
         tokio::spawn(async move {
-            let (reader, writer) = socket.into_split();
-            let reader = BufReader::new(reader);
-            let line = String::new();
-
-            let _ = async_parse_stream(reader, writer, line).await;
-
+            if let Err(e) = handle_connection(socket).await {
+                eprintln!("Error handling {}: {:?}", addr, e);
+            }
             // Use `socket` to read/write asynchronously here
         });
     }
 
-    async fn async_parse_stream(
-        mut reader: BufReader<OwnedReadHalf>,
-        mut writer: OwnedWriteHalf,
-        mut line: String,
-    ) -> std::io::Result<()> {
-        loop {
-            line.clear();
-            let bytes_read = reader.read_line(&mut line).await?;
-            if bytes_read == 0 {
-                // Connection closed
-                break;
-            }
-            if line.trim() == "PING" {
-                writer.write_all(b"+PONG\r\n").await?;
-            }
+    async fn handle_connection(socket: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+        let mut framed = Framed::new(socket, resp::RespCodec);
+
+        while let Some(result) = framed.next().await {
+            let resp_value = result?;
+            let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
+            println!("Received: {:?}", command);
+            framed.send(command.to_resp()).await?;
         }
+
         Ok(())
     }
 }
