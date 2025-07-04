@@ -7,7 +7,11 @@ pub enum RespCommand {
     Get(String),
     Ping,
     Echo(String),
-    Set(String, Vec<u8>),
+    Set {
+        key: String,
+        value: Vec<u8>,
+        px: Option<u64>,
+    },
 }
 
 impl RespCommand {
@@ -63,14 +67,34 @@ impl Command {
             "ping" => Ok(RespCommand::Ping),
             "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
             "get" => Ok(RespCommand::Get(command.args[0].clone())),
-            "set" => Ok(RespCommand::Set(
-                command.args[0].clone(),
-                command.args[1].clone().into_bytes(),
-            )),
+            "set" => parse_set(command),
 
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };
     }
+}
+
+fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
+    let key = command.args[0].clone();
+    let value = command.args[1].clone().into_bytes();
+    let mut px = None;
+    let mut optional_args = command.args.iter().skip(2);
+    while let Some(arg) = optional_args.next() {
+        match arg.to_lowercase().as_str() {
+            "px" => {
+                if let Some(px_value) = optional_args.next() {
+                    match px_value.parse::<u64>() {
+                        Ok(val) => px = Some(val),
+                        Err(_) => return invalid_data("PX value must be a positive integer"),
+                    }
+                } else {
+                    return invalid_data("PX value must be a positive integer");
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(RespCommand::Set { key, value, px })
 }
 
 fn invalid_data<T, S: Into<String>>(msg: S) -> Result<T, io::Error> {

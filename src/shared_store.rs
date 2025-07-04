@@ -1,10 +1,23 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 
 use crate::resp::RespValue;
 
-type SharedStore = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+#[derive(Debug, Clone)]
+pub struct Entry {
+    value: Vec<u8>,
+    expires_at: Option<Instant>,
+}
+
+impl Entry {
+    pub fn new(value: Vec<u8>, expires_at: Option<Instant>) -> Self {
+        Self { value, expires_at }
+    }
+}
+type SharedStore = Arc<RwLock<HashMap<String, Entry>>>;
 
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -21,16 +34,27 @@ impl Store {
     pub async fn get(&self, key: &str) -> crate::shared_store::RespValue {
         let value = {
             let map = self.data.read().await;
-            dbg!(&map);
-            map.get(key).cloned()
+            let entry = map.get(key).cloned();
+            if let Some(entry) = entry {
+                match entry.expires_at {
+                    Some(expiry) if Instant::now() >= expiry => None,
+                    _ => Some(entry.value),
+                }
+            } else {
+                None
+            }
         };
-        dbg!(&value);
+
         RespValue::BulkString(value)
     }
 
-    pub async fn set(&self, key: &str, value: Vec<u8>) {
-        let mut map = self.data.write().await;
-        map.insert(key.to_string(), value);
+    pub async fn set(&self, key: &str, value: Vec<u8>, px: Option<u64>) {
+        let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
+            self.data.write().await;
+        let expires_at = px.map(|ms| Instant::now() + Duration::from_millis(ms));
+
+        let entry = Entry::new(value, expires_at);
+        map.insert(key.to_string(), entry);
     }
 
     pub async fn del(&self, key: &str) {

@@ -47,8 +47,8 @@ async fn main() -> std::io::Result<()> {
                 RespCommand::Ping => RespValue::SimpleString("PONG".into()),
                 RespCommand::Echo(s) => RespValue::BulkString(Some(s.into_bytes())),
                 RespCommand::Get(key) => store.get(&key).await,
-                RespCommand::Set(key, value) => {
-                    store.set(&key, value).await;
+                RespCommand::Set {key, value, px} => {
+                    store.set(&key, value, px).await;
                     RespValue::SimpleString("OK".into())
                 }
             };
