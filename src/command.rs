@@ -75,7 +75,7 @@ impl Command {
             "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
             "get" => Ok(RespCommand::Get(command.args[0].clone())),
             "set" => parse_set(command),
-
+            "config" => parse_config(command),
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };
     }
@@ -104,7 +104,7 @@ fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
     Ok(RespCommand::Set { key, value, px })
 }
 
-fn parse_command(command: Command) -> Result<RespCommand, io::Error> {
+fn parse_config(command: Command) -> Result<RespCommand, io::Error> {
     let Some(action) = command.args.get(0) else {
         return invalid_data("Missing CONFIG action");
     };

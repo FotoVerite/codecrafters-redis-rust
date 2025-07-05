@@ -10,10 +10,25 @@ pub struct RdbConfig {
 
 impl RdbConfig {
     pub fn new() -> Self {
-        Self {
-            dir: "/tmp/redis-files".to_string(),
-            dbfilename: "dump.rdb".to_string(),
+        let mut dir = "/tmp/redis-files".to_string();
+        let mut dbfilename = "dump.rdb".to_string();
+        let mut args = std::env::args().peekable();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--dir" => {
+                    if let Some(dir_str) = args.next() {
+                        dir = dir_str
+                    }
+                }
+                "--dbfilename" => {
+                    if let Some(dbfilename_str) = args.next() {
+                        dbfilename = dbfilename_str
+                    }
+                }
+                _ => {}
+            }
         }
+        Self { dir, dbfilename }
     }
 
     fn dir(&self) -> &String {

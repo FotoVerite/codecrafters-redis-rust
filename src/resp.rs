@@ -140,6 +140,15 @@ impl RespCodec {
         }
         Ok(None)
     }
+
+    pub fn write_array(&mut self, dst: &mut BytesMut, values: Vec<RespValue>) -> Result<(), io::Error> {
+        dst.put_u8(b'*');
+        dst.extend_from_slice(format!("{}\r\n", values.len()).as_bytes());
+        for value in values {
+            self.encode(value, dst)?
+        }
+        Ok(())
+    }
 }
 
 impl Encoder<RespValue> for RespCodec {
@@ -151,7 +160,7 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::Error(e) => write_line(dst, b'-', &e),
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
             RespValue::BulkString(c) => write_bulk_string(dst, c),
-            RespValue::Array(s) => Ok(()),
+            RespValue::Array(values) => self.write_array(dst, values),
         }
     }
 }
@@ -164,7 +173,7 @@ fn write_line(dst: &mut BytesMut, prefix: u8, content: &str) -> Result<(), io::E
 }
 
 fn write_bulk_string(dst: &mut BytesMut, option: Option<Vec<u8>>) -> Result<(), io::Error> {
- match option {
+    match option {
         Some(data) => {
             // Write: $<length>\r\n<data>\r\n
             let len = data.len();
