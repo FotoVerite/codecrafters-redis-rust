@@ -1,5 +1,5 @@
-use bytes::BytesMut;
-use std::io;
+use bytes::{BufMut, BytesMut};
+use std::{fmt::Write, io};
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Debug)]
@@ -164,7 +164,7 @@ fn write_line(dst: &mut BytesMut, prefix: u8, content: &str) -> Result<(), io::E
 }
 
 fn write_bulk_string(dst: &mut BytesMut, option: Option<Vec<u8>>) -> Result<(), io::Error> {
-    match option {
+ match option {
         Some(data) => {
             // Write: $<length>\r\n<data>\r\n
             let len = data.len();
