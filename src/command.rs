@@ -3,6 +3,12 @@ use futures::io;
 use crate::resp::RespValue;
 
 #[derive(Debug)]
+pub enum ConfigCommand {
+    Get(String),
+    Set(String, String),
+}
+
+#[derive(Debug)]
 pub enum RespCommand {
     Get(String),
     Ping,
@@ -12,6 +18,7 @@ pub enum RespCommand {
         value: Vec<u8>,
         px: Option<u64>,
     },
+    ConfigCommand(ConfigCommand),
 }
 
 impl RespCommand {
@@ -97,8 +104,29 @@ fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
     Ok(RespCommand::Set { key, value, px })
 }
 
+fn parse_command(command: Command) -> Result<RespCommand, io::Error> {
+    let Some(action) = command.args.get(0) else {
+        return invalid_data("Missing CONFIG action");
+    };
+
+    match action.to_ascii_lowercase().as_str() {
+        "get" => {
+            let key = command
+                .args
+                .get(1)
+                .ok_or_else(|| invalid_data_err("Missing CONFIG GET key"))?;
+            Ok(RespCommand::ConfigCommand(ConfigCommand::Get(key.clone())))
+        }
+        _ => invalid_data("Unknown CONFIG action"),
+    }
+}
+
 fn invalid_data<T, S: Into<String>>(msg: S) -> Result<T, io::Error> {
     Err(io::Error::new(io::ErrorKind::InvalidData, msg.into()))
+}
+
+fn invalid_data_err<S: Into<String>>(msg: S) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
 
 fn convert_bulk_string(resp_value: Option<Vec<u8>>) -> Result<String, io::Error> {
