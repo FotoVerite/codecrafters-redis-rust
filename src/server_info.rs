@@ -1,6 +1,9 @@
 use std::io::{self};
 
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 use crate::error_helpers;
 
@@ -104,16 +107,30 @@ impl ServerInfo {
     }
 
     pub async fn handshake(&self) -> io::Result<()> {
-        dbg!(&self.role, &self.repl_host, self.repl_port);
         if self.role.as_str() == "master" {
             return Ok(());
         }
         if let (Some(host), Some(port)) = (&self.repl_host, self.repl_port) {
             dbg!(host, port);
+            let mut buffer = [0; 1024];
+
             let mut stream = TcpStream::connect((host.as_str(), port)).await?;
             let ping_cmd = b"*1\r\n$4\r\nPING\r\n";
             stream.write_all(ping_cmd).await?;
             stream.flush().await?;
+            stream.read(&mut buffer).await?;
+
+            stream
+                .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n")
+                .await?;
+            stream.flush().await?;
+            stream.read(&mut buffer).await?;
+
+            stream
+                .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+                .await?;
+            stream.flush().await?;
+            stream.read(&mut buffer).await?;
         }
         Ok(())
     }
