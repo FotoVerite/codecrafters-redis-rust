@@ -18,6 +18,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     command::{ConfigCommand, ReplconfCommand, RespCommand},
+    error_helpers::{invalid_data, invalid_data_err},
     rdb::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
     resp::{RespCodec, RespValue},
@@ -52,7 +53,6 @@ async fn main() -> std::io::Result<()> {
         let rdb_clone = rdb.clone();
         let info_clone = info.clone();
         let replication_manager_clone = replication_manager.clone();
-        let pee_addr_clone = peer_address.clone();
         // Spawn a new async task to handle the connection
         tokio::spawn(async move {
             if let Err(e) = handle_connection(
@@ -61,7 +61,6 @@ async fn main() -> std::io::Result<()> {
                 rdb_clone,
                 replication_manager_clone,
                 info_clone,
-                pee_addr_clone,
             )
             .await
             {
@@ -77,26 +76,27 @@ async fn main() -> std::io::Result<()> {
         rdb: Arc<RdbConfig>,
         manager: Arc<Mutex<ReplicationManager>>,
         info: Arc<ServerInfo>,
-        peer_addr: String,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut framed = Framed::new(socket, resp::RespCodec);
-
+        let mut peer_addr = None;
         while let Some(result) = framed.next().await {
             let resp_value = result?;
             let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
             println!("Received: {:?}", &command);
 
-            if let RespCommand::PSYNC(string, pos) = command {
-                handle_psync_command(
-                    framed,
-                    string,
-                    pos,
-                    info.clone(),
-                    manager.clone(),
-                    peer_addr.clone(),
-                )
-                .await?;
-                break; // End the loop for this connection
+            if let RespCommand::PSYNC(string, pos) = command.clone() {
+                if let Some(peer_addr) = peer_addr {
+                    handle_psync_command(
+                        framed,
+                        string,
+                        pos,
+                        info.clone(),
+                        manager.clone(),
+                        peer_addr,
+                    )
+                    .await?;
+                    break; // End the loop for this connection
+                }
             }
 
             let response_value = match command {
@@ -119,9 +119,11 @@ async fn main() -> std::io::Result<()> {
                 }
                 RespCommand::Keys(string) => Some(handle_keys_command(string, store.clone()).await),
                 RespCommand::Info(string) => Some(handle_info_command(string, info.clone())),
-                RespCommand::ReplconfCommand(command) => {
-                    Some(handle_replconf_command(command, info.clone()))
-                }
+                RespCommand::ReplconfCommand(command) => Some(handle_replconf_command(
+                    command,
+                    info.clone(),
+                    &mut peer_addr,
+                )),
                 RespCommand::PSYNC(_, _) => unreachable!(), // Should be handled above
             };
 
@@ -163,7 +165,15 @@ async fn main() -> std::io::Result<()> {
 
         Ok(())
     }
-    fn handle_replconf_command(_command: ReplconfCommand, _rdb: Arc<ServerInfo>) -> RespValue {
+    fn handle_replconf_command(
+        command: ReplconfCommand,
+        _rdb: Arc<ServerInfo>,
+        peer_addr: &mut Option<String>,
+    ) -> RespValue {
+        match command {
+            ReplconfCommand::ListeningPort(addr) => *peer_addr = Some(addr),
+            _ => {}
+        }
         RespValue::SimpleString("OK".into())
     }
 

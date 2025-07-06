@@ -30,7 +30,7 @@ impl ReplicationManager {
         socket: SocketAddr,
         stream: TcpStream,
     ) -> io::Result<()> {
-        dbg!("called add_replica");
+        dbg!("called add_replica", &addr);
 
         let replica = Replica::new(socket, stream);
         self.replicas.lock().await.insert(addr, replica);
@@ -38,10 +38,8 @@ impl ReplicationManager {
     }
 
     pub async fn send_to_replicas(&self, command: RespCommand) -> io::Result<()> {
-        dbg!("called");
         let replicas_guard = self.replicas.lock().await; // Lock the mutex asynchronously
         for (key, replica) in replicas_guard.iter() {
-            dbg!(replica);
             replica.send(command.clone()).await?;
         }
         Ok(())
