@@ -67,7 +67,7 @@ impl RdbConfig {
                         }
                     };
                     dbg!(&value);
-                    ret.push((key, vec![]))
+                    ret.push((key, value))
                 }
                 _ => {
                 }
