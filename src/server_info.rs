@@ -12,6 +12,8 @@ pub struct ServerInfo {
     pub config_file: Option<String>,
     pub tcp_port: u16,
     pub role: String, // <- add this
+    pub master_replid: String,
+    pub master_repl_offset: u64,
 }
 
 impl ServerInfo {
@@ -23,13 +25,11 @@ impl ServerInfo {
             match arg.as_str() {
                 "--port" => {
                     if let Some(port_str) = args.next() {
-                        tcp_port = port_str.parse().unwrap_or_else(|_| {
-                            6379u16
-                        })
+                        tcp_port = port_str.parse().unwrap_or_else(|_| 6379u16)
                     }
                 }
                 "--replicaof" => {
-                    role ="slave";
+                    role = "slave";
                     if let Some(host_str) = args.next() {
                         // tcp_port = host_str.parse().unwrap_or_else(|_| {
                         //     6379u16
@@ -60,11 +60,13 @@ impl ServerInfo {
             config_file: None,
             tcp_port,
             role: role.into(),
-             // <- default role }
+            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".into(),
+            master_repl_offset: 0,
+            // <- default role }
         }
     }
 
-   pub fn info_section(&self) -> String {
+    pub fn info_section(&self) -> String {
         format!(
             "# Server\n\
             redis_version:{}\n\
@@ -79,7 +81,9 @@ impl ServerInfo {
             executable:{}\n\
             config_file:{}\n\
             tcp_port:{}\n\
-            role:{}\n",
+            role:{}\n\
+            master_replid:{}\n\
+            master_repl_offset:{}\n",
             self.redis_version,
             self.redis_mode,
             self.os,
@@ -92,7 +96,9 @@ impl ServerInfo {
             self.executable,
             self.config_file.clone().unwrap_or_default(),
             self.tcp_port,
-            self.role
+            self.role,
+            self.master_replid,
+            self.master_repl_offset
         )
     }
 }
