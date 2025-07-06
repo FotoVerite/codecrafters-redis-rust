@@ -48,6 +48,26 @@ impl Store {
         RespValue::BulkString(value)
     }
 
+    pub async fn keys(&self) -> crate::shared_store::RespValue {
+        let mut values = vec![];
+        let map = self.data.read().await;
+        for key in map.keys() {
+            let entry = map.get(key).cloned();
+            if let Some(entry) = entry {
+                match entry.expires_at {
+                    Some(expiry) if Instant::now() >= expiry => (),
+                    _ => {
+                        values.push(RespValue::BulkString(Some(key.as_bytes().to_vec())));
+                    }
+                }
+            } else {
+                ()
+            }
+        }
+
+        RespValue::Array(values)
+    }
+
     pub async fn set(&self, key: &str, value: Vec<u8>, px: Option<u64>) {
         let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
             self.data.write().await;

@@ -10,10 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
 use crate::{
-    command::{ConfigCommand, RespCommand},
-    rdb::RdbConfig,
-    resp::RespValue,
-    shared_store::Store,
+    command::{ConfigCommand, RespCommand}, rdb::config::RdbConfig, resp::RespValue, shared_store::Store
 };
 
 #[tokio::main]
@@ -26,6 +23,12 @@ async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     let store = Arc::new(Store::new());
     let rdb = Arc::new(RdbConfig::new());
+    {
+        let database = rdb.load()?;
+        for (key, value) in database {
+            store.set(&key, value, None).await;
+        }
+    }
     loop {
         let (socket, addr) = listener.accept().await?;
         println!("New connection from {}", addr);
@@ -61,6 +64,7 @@ async fn main() -> std::io::Result<()> {
                     RespValue::SimpleString("OK".into())
                 }
                 RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
+                RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
             };
             println!("Sending: {:?}", &response_value);
 
@@ -83,6 +87,13 @@ async fn main() -> std::io::Result<()> {
                 }
             }
             _ => RespValue::SimpleString("Ok".into()),
+        }
+    }
+
+    async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
+        match command.as_str() {
+            "*" => store.keys().await,
+            other => RespValue::Array(vec![]),
         }
     }
 }

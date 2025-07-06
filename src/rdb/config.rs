@@ -1,6 +1,10 @@
-use std::path::Path;
+#![allow(dead_code)]
 
-use tokio::io;
+use std::{
+    fs::File,
+    io::{self, BufReader, Read},
+    path::Path,
+};
 
 #[derive(Debug, Clone)]
 pub struct RdbConfig {
@@ -63,7 +67,7 @@ impl RdbConfig {
             self.dbfilename = input;
             Ok(())
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid Dir"))
+            Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid Filename"))
         }
     }
 }

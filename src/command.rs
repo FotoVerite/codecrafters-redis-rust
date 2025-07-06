@@ -19,6 +19,7 @@ pub enum RespCommand {
         px: Option<u64>,
     },
     ConfigCommand(ConfigCommand),
+    Keys(String),
 }
 
 impl RespCommand {
@@ -76,6 +77,7 @@ impl Command {
             "get" => Ok(RespCommand::Get(command.args[0].clone())),
             "set" => parse_set(command),
             "config" => parse_config(command),
+            "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };
     }
