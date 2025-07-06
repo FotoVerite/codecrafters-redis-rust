@@ -2,18 +2,18 @@ use futures::io;
 
 use crate::resp::RespValue;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConfigCommand {
     Get(String),
     Set(String, String),
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReplconfCommand {
     ListeningPort(String),
     Capa(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RespCommand {
     Get(String),
     Ping,
