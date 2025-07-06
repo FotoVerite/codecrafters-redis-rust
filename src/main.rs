@@ -23,7 +23,9 @@ use crate::{
 async fn main() -> std::io::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
-    let server_info: ServerInfo = ServerInfo::new();
+    let server_info: ServerInfo = ServerInfo::new()?;
+    dbg!("asds");
+    server_info.handshake().await?;
     let bind = format!("127.0.0.1:{}", server_info.tcp_port);
     //Uncomment this block to pass the first stage
 
