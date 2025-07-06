@@ -2,6 +2,8 @@ mod command;
 mod rdb;
 mod resp;
 mod shared_store;
+mod server_info;
+mod error_helpers;
 
 use std::sync::Arc;
 
@@ -10,17 +12,18 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
 use crate::{
-    command::{ConfigCommand, RespCommand}, rdb::config::RdbConfig, resp::RespValue, shared_store::Store
+    command::{ConfigCommand, RespCommand}, rdb::config::RdbConfig, resp::RespValue, server_info::ServerInfo, shared_store::Store
 };
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
-
+    let server_info: ServerInfo = ServerInfo::new();
+    let bind = format!("127.0.0.1:{}", server_info.tcp_port);
     //Uncomment this block to pass the first stage
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let listener = TcpListener::bind(bind).await?;
     let store = Arc::new(Store::new());
     let rdb = Arc::new(RdbConfig::new());
     {
