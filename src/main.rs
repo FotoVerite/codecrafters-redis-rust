@@ -8,13 +8,16 @@ mod shared_store;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    io::{self, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
 use tokio_util::codec::Framed;
 
 use crate::{
     command::{ConfigCommand, ReplconfCommand, RespCommand},
     rdb::config::RdbConfig,
-    resp::RespValue,
+    resp::{RespCodec, RespValue},
     server_info::ServerInfo,
     shared_store::Store,
 };
@@ -66,32 +69,57 @@ async fn main() -> std::io::Result<()> {
             let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
             println!("Received: {:?}", &command);
 
-            let response_value = match command {
-                RespCommand::Ping => RespValue::SimpleString("PONG".into()),
-                RespCommand::Echo(s) => RespValue::BulkString(Some(s.into_bytes())),
-                RespCommand::Get(key) => store.get(&key).await,
+            let response_value: Option<RespValue> = match command {
+                RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
+                RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
+                RespCommand::Get(key) => Some(store.get(&key).await),
                 RespCommand::Set { key, value, px } => {
                     store.set(&key, value, px).await;
-                    RespValue::SimpleString("OK".into())
+                    Some(RespValue::SimpleString("OK".into()))
                 }
-                RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
-                RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
-                RespCommand::Info(string) => handle_info_command(string, info.clone()),
+                RespCommand::ConfigCommand(command) => {
+                    Some(handle_config_command(command, rdb.clone()))
+                }
+                RespCommand::Keys(string) => Some(handle_keys_command(string, store.clone()).await),
+                RespCommand::Info(string) => Some(handle_info_command(string, info.clone())),
                 RespCommand::ReplconfCommand(command) => {
-                    handle_replconf_command(command, info.clone())
+                    Some(handle_replconf_command(command, info.clone()))
                 }
-                RespCommand::PSYNC(string, pos) => handle_psync_command(string, pos, info.clone()),
+                RespCommand::PSYNC(string, pos) => {
+                    handle_psync_command(&mut framed, string, pos, info.clone()).await?
+                }
             };
+
             println!("Sending: {:?}", &response_value);
 
-            framed.send(response_value).await?;
+            if let Some(value) = response_value {
+                framed.send(value).await?;
+            }
         }
 
         Ok(())
     }
 
-    fn handle_psync_command(_string: String, _pos: i64, info: Arc<ServerInfo>) -> RespValue {
-        RespValue::SimpleString(format!("FULLRESYNC {} 0", info.master_replid).into())
+    async fn handle_psync_command(
+        framed: &mut Framed<TcpStream, RespCodec>,
+        _string: String,
+        _pos: i64,
+        info: Arc<ServerInfo>,
+    ) -> io::Result<Option<RespValue>> {
+        let first_response =
+            RespValue::SimpleString(format!("FULLRESYNC {} 0", info.master_replid).into());
+        framed.send(first_response).await?;
+
+        let blank_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+        let rdb_bytes = hex::decode(blank_hex).unwrap();
+
+        let stream = framed.get_mut();
+        let header = format!("${}\r\n", rdb_bytes.len());
+        stream.write_all(header.as_bytes()).await?;
+        stream.write_all(rdb_bytes.as_slice()).await?;
+        stream.flush().await?;
+
+        Ok(None)
     }
     fn handle_replconf_command(_command: ReplconfCommand, _rdb: Arc<ServerInfo>) -> RespValue {
         RespValue::SimpleString("OK".into())

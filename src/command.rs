@@ -168,7 +168,7 @@ fn parse_psync(command: Command) -> Result<RespCommand, io::Error> {
     } else {
         let pos = command.args[1]
             .parse::<i64>()
-            .map_err(|_| invalid_data_err("Parsing Error with psync command"))?;
+            .map_err(|_| invalid_data_err("Parsing Erorr with psync command"))?;
         Ok(RespCommand::PSYNC(command.args[0].clone(), pos))
     }
 }
