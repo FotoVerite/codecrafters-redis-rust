@@ -75,7 +75,7 @@ async fn main() -> std::io::Result<()> {
                 }
                 RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
                 RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
-                RespCommand::Info(string) => handle_info_command(string, info.clone),
+                RespCommand::Info(string) => handle_info_command(string, info.clone()),
             };
             println!("Sending: {:?}", &response_value);
 
@@ -101,7 +101,7 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    fn handle_info_command(_command: ConfigCommand, _info: Arc<ServerInfo>) -> RespValue {
+    fn handle_info_command(_command: String, _info: Arc<ServerInfo>) -> RespValue {
         RespValue::BulkString(Some("role:master".to_string().into_bytes()))
     }
 
