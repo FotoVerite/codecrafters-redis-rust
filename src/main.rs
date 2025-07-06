@@ -25,8 +25,8 @@ async fn main() -> std::io::Result<()> {
     let rdb = Arc::new(RdbConfig::new());
     {
         let database = rdb.load()?;
-        for (key, value) in database {
-            store.set(&key, value, None).await;
+        for (key, value, px) in database {
+            store.set(&key, value, px).await;
         }
     }
     loop {

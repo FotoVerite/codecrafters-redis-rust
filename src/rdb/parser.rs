@@ -2,12 +2,13 @@ use std::{
     fs::File,
     io::{self, BufRead, BufReader, Read},
     path::Path,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::rdb::{config::RdbConfig, length_encoded_values::LengthEncodedValue};
 
 impl RdbConfig {
-    pub fn load(&self) -> Result<Vec<(String, Vec<u8>)>, io::Error> {
+    pub fn load(&self) -> Result<Vec<(String, Vec<u8>, Option<u64>)>, io::Error> {
         let mut ret = vec![];
         let path = Path::new(&self.dir).join(&self.dbfilename);
         if !path.exists() {
@@ -28,6 +29,7 @@ impl RdbConfig {
         let mut reader = BufReader::new(file);
         self.check_header(&mut reader)?;
         let _ = self.get_version(&mut reader)?;
+        let mut expiry: Option<u64> = None;
         loop {
             let mut op = [0u8; 1];
             if let Err(e) = reader.read_exact(&mut op) {
@@ -38,11 +40,8 @@ impl RdbConfig {
                 }
             }
             let opcode = op[0];
-
             match opcode {
-                0xFF => {
-                    break
-                }
+                0xFF => break,
                 0xFA => {
                     // AUX field
                     let _key = LengthEncodedValue::from_reader(&mut reader)?;
@@ -60,11 +59,19 @@ impl RdbConfig {
                     // EXPIRE: 4‑byte seconds (big endian)
                     let mut secs = [0u8; 4];
                     reader.read_exact(&mut secs)?;
+                    eprintln!("EXPIRETIME_SEC raw bytes: {:02X?}", secs); // Debug output
+
+                    expiry = Some(u32::from_be_bytes(secs) as u64 * 1000);
+                    continue;
                 }
                 0xFC => {
                     // PEXPIRE: 8‑byte milliseconds (big endian)
                     let mut ms = [0u8; 8];
                     reader.read_exact(&mut ms)?;
+                    eprintln!("EXPIRETIME_MS raw bytes: {:02X?}", ms); // Debug output
+
+                    expiry = Some(u64::from_le_bytes(ms));
+                    continue;
                 }
                 0xFB => {
                     let mut next_byte = [0u8; 2];
@@ -86,7 +93,17 @@ impl RdbConfig {
                             }
                         }
                     };
-                    ret.push((key, value))
+                    eprintln!("key: {:?}", key);
+                    eprintln!("expiry: {:?}", expiry);
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_millis() as u64;
+                    if (expiry.is_some() && now < expiry.unwrap() )|| expiry.is_none() {
+                        ret.push((key, value, expiry));
+                    }
+                    expiry = None;
                 }
                 _ => {
                     return Err(io::Error::new(

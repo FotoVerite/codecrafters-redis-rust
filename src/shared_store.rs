@@ -34,7 +34,6 @@ impl Store {
     pub async fn get(&self, key: &str) -> crate::shared_store::RespValue {
         let value = {
             let map = self.data.read().await;
-            dbg!(&map);
             let entry = map.get(key).cloned();
             if let Some(entry) = entry {
                 match entry.expires_at {
