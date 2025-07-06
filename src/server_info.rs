@@ -1,11 +1,16 @@
 use std::io::{self};
 
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+use tokio_util::codec::Framed;
 
-use crate::error_helpers;
+use crate::{
+    error_helpers,
+    resp::{RespCodec, RespValue},
+};
 
 pub struct ServerInfo {
     pub redis_version: String,
@@ -111,26 +116,43 @@ impl ServerInfo {
             return Ok(());
         }
         if let (Some(host), Some(port)) = (&self.repl_host, self.repl_port) {
-            dbg!(host, port);
-            let mut buffer = [0; 1024];
-
             let mut stream = TcpStream::connect((host.as_str(), port)).await?;
-            let ping_cmd = b"*1\r\n$4\r\nPING\r\n";
-            stream.write_all(ping_cmd).await?;
-            stream.flush().await?;
-            stream.read(&mut buffer).await?;
-
-            stream
-                .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n")
+            let mut framed = Framed::new(stream, RespCodec);
+            framed
+                .send(RespValue::Array(vec![RespValue::BulkString(Some(
+                    "PING".into(),
+                ))]))
                 .await?;
-            stream.flush().await?;
-            stream.read(&mut buffer).await?;
+            let _ = framed.next().await; // optionally check for +OK
 
-            stream
-                .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+            let port_str = self.tcp_port.to_string();
+            framed
+                .send(RespValue::Array(vec![
+                    RespValue::BulkString(Some("REPLCONF".into())),
+                    RespValue::BulkString(Some("listening-port".into())),
+                    RespValue::BulkString(Some(port_str.into_bytes())),
+                ]))
                 .await?;
-            stream.flush().await?;
-            stream.read(&mut buffer).await?;
+            let _ = framed.next().await; // optionally check for +OK
+
+            // Step 3: Send REPLCONF capa psync2
+            framed
+                .send(RespValue::Array(vec![
+                    RespValue::BulkString(Some("REPLCONF".into())),
+                    RespValue::BulkString(Some("capa".into())),
+                    RespValue::BulkString(Some("psync2".into())),
+                ]))
+                .await?;
+            let _ = framed.next().await;
+
+            framed
+                .send(RespValue::Array(vec![
+                    RespValue::BulkString(Some("PSYNC".into())),
+                    RespValue::BulkString(Some("?".into())),
+                    RespValue::BulkString(Some("-1".into())),
+                ]))
+                .await?;
+            let _ = framed.next().await;
         }
         Ok(())
     }
