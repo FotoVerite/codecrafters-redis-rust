@@ -17,6 +17,7 @@ pub struct ServerInfo {
 impl ServerInfo {
     pub fn new() -> Self {
         let mut tcp_port = 6379u16;
+        let mut role = "master";
         let mut args = std::env::args().peekable();
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -25,6 +26,20 @@ impl ServerInfo {
                         tcp_port = port_str.parse().unwrap_or_else(|_| {
                             6379u16
                         })
+                    }
+                }
+                "--replicaof" => {
+                    role ="slave";
+                    if let Some(host_str) = args.next() {
+                        // tcp_port = host_str.parse().unwrap_or_else(|_| {
+                        //     6379u16
+                        // })
+                    }
+
+                    if let Some(host_str) = args.next() {
+                        // tcp_port = host_str.parse().unwrap_or_else(|_| {
+                        //     6379u16
+                        // })
                     }
                 }
 
@@ -44,7 +59,40 @@ impl ServerInfo {
             executable: std::env::args().next().unwrap_or_default(),
             config_file: None,
             tcp_port,
-            role: "master".into(), // <- default role }
+            role: role.into(),
+             // <- default role }
         }
+    }
+
+   pub fn info_section(&self) -> String {
+        format!(
+            "# Server\n\
+            redis_version:{}\n\
+            redis_mode:{}\n\
+            os:{}\n\
+            arch_bits:{}\n\
+            process_id:{}\n\
+            uptime_in_seconds:{}\n\
+            uptime_in_days:{}\n\
+            hz:{}\n\
+            lru_clock:{}\n\
+            executable:{}\n\
+            config_file:{}\n\
+            tcp_port:{}\n\
+            role:{}\n",
+            self.redis_version,
+            self.redis_mode,
+            self.os,
+            self.arch_bits,
+            self.process_id,
+            self.uptime_in_seconds,
+            self.uptime_in_days,
+            self.hz,
+            self.lru_clock,
+            self.executable,
+            self.config_file.clone().unwrap_or_default(),
+            self.tcp_port,
+            self.role
+        )
     }
 }

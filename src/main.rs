@@ -101,8 +101,8 @@ async fn main() -> std::io::Result<()> {
         }
     }
 
-    fn handle_info_command(_command: String, _info: Arc<ServerInfo>) -> RespValue {
-        RespValue::BulkString(Some("role:master".to_string().into_bytes()))
+    fn handle_info_command(_command: String, info: Arc<ServerInfo>) -> RespValue {
+        RespValue::BulkString(Some(info.info_section().into_bytes()))
     }
 
     async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
