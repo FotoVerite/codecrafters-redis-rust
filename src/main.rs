@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
 use crate::{
-    command::{ConfigCommand, RespCommand},
+    command::{ConfigCommand, ReplconfCommand, RespCommand},
     rdb::config::RdbConfig,
     resp::RespValue,
     server_info::ServerInfo,
@@ -77,6 +77,7 @@ async fn main() -> std::io::Result<()> {
                 RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
                 RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
                 RespCommand::Info(string) => handle_info_command(string, info.clone()),
+                RespCommand::ReplconfCommand(command) => handle_replconf_command(command, info.clone()),
             };
             println!("Sending: {:?}", &response_value);
 
@@ -84,6 +85,10 @@ async fn main() -> std::io::Result<()> {
         }
 
         Ok(())
+    }
+
+    fn handle_replconf_command(_command: ReplconfCommand, _rdb: Arc<ServerInfo>) -> RespValue {
+        RespValue::SimpleString("OK".into())
     }
 
     fn handle_config_command(command: ConfigCommand, rdb: Arc<RdbConfig>) -> RespValue {

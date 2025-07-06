@@ -7,6 +7,11 @@ pub enum ConfigCommand {
     Get(String),
     Set(String, String),
 }
+#[derive(Debug)]
+pub enum ReplconfCommand {
+    ListeningPort(String),
+    Capa(String),
+}
 
 #[derive(Debug)]
 pub enum RespCommand {
@@ -21,6 +26,7 @@ pub enum RespCommand {
     ConfigCommand(ConfigCommand),
     Keys(String),
     Info(String),
+    ReplconfCommand(ReplconfCommand),
 }
 
 impl RespCommand {
@@ -80,6 +86,7 @@ impl Command {
             "config" => parse_config(command),
             "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
             "info" => Ok(RespCommand::Info(command.args[0].clone())),
+            "replconf" => parse_replconf(command),
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };
     }
@@ -106,6 +113,32 @@ fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
         }
     }
     Ok(RespCommand::Set { key, value, px })
+}
+
+fn parse_replconf(command: Command) -> io::Result<RespCommand> {
+    let Some(action) = command.args.get(0) else {
+        return invalid_data("Missing Replconf action");
+    };
+    match action.to_ascii_lowercase().as_str() {
+        "listening-port" => {
+             let port = command
+                .args
+                .get(1)
+                .ok_or_else(|| invalid_data_err("Missing Port Field"))?;
+            Ok(RespCommand::ReplconfCommand(ReplconfCommand::ListeningPort(port.clone())))
+        }
+
+        "capa" => {
+             let capa = command
+                .args
+                .get(1)
+                .ok_or_else(|| invalid_data_err("Missing Capa fields"))?;
+            Ok(RespCommand::ReplconfCommand(ReplconfCommand::Capa(capa.clone())))
+        }
+        _ => {
+            invalid_data("Unknown Replconf action")
+        }
+    }
 }
 
 fn parse_config(command: Command) -> Result<RespCommand, io::Error> {
