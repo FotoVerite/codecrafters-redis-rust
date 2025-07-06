@@ -1,9 +1,9 @@
 mod command;
+mod error_helpers;
 mod rdb;
 mod resp;
-mod shared_store;
 mod server_info;
-mod error_helpers;
+mod shared_store;
 
 use std::sync::Arc;
 
@@ -12,7 +12,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
 use crate::{
-    command::{ConfigCommand, RespCommand}, rdb::config::RdbConfig, resp::RespValue, server_info::ServerInfo, shared_store::Store
+    command::{ConfigCommand, RespCommand},
+    rdb::config::RdbConfig,
+    resp::RespValue,
+    server_info::ServerInfo,
+    shared_store::Store,
 };
 
 #[tokio::main]
@@ -26,6 +30,7 @@ async fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(bind).await?;
     let store = Arc::new(Store::new());
     let rdb = Arc::new(RdbConfig::new());
+    let info = Arc::new(server_info);
     {
         let database = rdb.load()?;
         for (key, value, px) in database {
@@ -37,9 +42,10 @@ async fn main() -> std::io::Result<()> {
         println!("New connection from {}", addr);
         let store_clone = store.clone();
         let rdb_clone = rdb.clone();
+        let info_clone = info.clone();
         // Spawn a new async task to handle the connection
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(socket, store_clone, rdb_clone).await {
+            if let Err(e) = handle_connection(socket, store_clone, rdb_clone, info_clone).await {
                 eprintln!("Error handling {}: {:?}", addr, e);
             }
             // Use `socket` to read/write asynchronously here
@@ -50,6 +56,7 @@ async fn main() -> std::io::Result<()> {
         socket: TcpStream,
         store: Arc<Store>,
         rdb: Arc<RdbConfig>,
+        info: Arc<ServerInfo>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let mut framed = Framed::new(socket, resp::RespCodec);
 
@@ -68,6 +75,7 @@ async fn main() -> std::io::Result<()> {
                 }
                 RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
                 RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
+                RespCommand::Info(string) => handle_info_command(string, info.clone),
             };
             println!("Sending: {:?}", &response_value);
 
@@ -91,6 +99,10 @@ async fn main() -> std::io::Result<()> {
             }
             _ => RespValue::SimpleString("Ok".into()),
         }
+    }
+
+    fn handle_info_command(_command: ConfigCommand, _info: Arc<ServerInfo>) -> RespValue {
+        RespValue::BulkString(Some("role:master".to_string().into_bytes()))
     }
 
     async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
