@@ -13,26 +13,36 @@ impl RdbConfig {
         if !path.exists() {
             return Ok(vec![]);
         }
+        let raw = std::fs::read(&path)?;
+        eprintln!("--- full RDB dump ({} bytes) ---", raw.len());
+        for (i, chunk) in raw.chunks(16).enumerate() {
+            // print a hex offset
+            eprint!("{:08X}: ", i * 16);
+            for byte in chunk {
+                eprint!("{:02X} ", byte);
+            }
+            eprintln!();
+        }
+        eprintln!("--------------------------------");
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
         self.check_header(&mut reader)?;
         let _ = self.get_version(&mut reader)?;
         loop {
-            let opcode_buf = reader.fill_buf()?;
-            if opcode_buf.is_empty() {
-                // EOF or no more bytes to read
-                break;
+            let mut op = [0u8; 1];
+            if let Err(e) = reader.read_exact(&mut op) {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    break; // clean EOF
+                } else {
+                    return Err(e);
+                }
             }
-            let opcode = opcode_buf[0];
-
-            if opcode == 0xFF {
-                reader.consume(1);
-
-                break;
-            }
-            reader.consume(1);
+            let opcode = op[0];
 
             match opcode {
+                0xFF => {
+                    break
+                }
                 0xFA => {
                     // AUX field
                     let _key = LengthEncodedValue::from_reader(&mut reader)?;
@@ -46,18 +56,28 @@ impl RdbConfig {
 
                     // skip or store db_num
                 }
-                0x00 => {
-                    reader.consume(1);
+                0xFD => {
+                    // EXPIRE: 4‑byte seconds (big endian)
+                    let mut secs = [0u8; 4];
+                    reader.read_exact(&mut secs)?;
+                }
+                0xFC => {
+                    // PEXPIRE: 8‑byte milliseconds (big endian)
+                    let mut ms = [0u8; 8];
+                    reader.read_exact(&mut ms)?;
+                }
+                0xFB => {
+                    let mut next_byte = [0u8; 2];
+                    reader.read_exact(&mut next_byte)?;
+                }
 
+                0x00 => {
                     let key = {
                         match self.decode_string(&mut reader)? {
                             LengthEncodedValue::String(string) => string,
                             LengthEncodedValue::Integer(integer) => integer.to_string(),
                         }
                     };
-                    dbg!(&key);
-
-                    dbg!("hello");
                     let value = {
                         match self.decode_string(&mut reader)? {
                             LengthEncodedValue::String(string) => string.into_bytes(),
@@ -66,10 +86,16 @@ impl RdbConfig {
                             }
                         }
                     };
-                    dbg!(&value);
                     ret.push((key, value))
                 }
                 _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Unexpected opcode (really a length prefix) 0x{:02X}",
+                            opcode
+                        ),
+                    ));
                 }
             }
         }
