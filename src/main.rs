@@ -77,7 +77,10 @@ async fn main() -> std::io::Result<()> {
                 RespCommand::ConfigCommand(command) => handle_config_command(command, rdb.clone()),
                 RespCommand::Keys(string) => handle_keys_command(string, store.clone()).await,
                 RespCommand::Info(string) => handle_info_command(string, info.clone()),
-                RespCommand::ReplconfCommand(command) => handle_replconf_command(command, info.clone()),
+                RespCommand::ReplconfCommand(command) => {
+                    handle_replconf_command(command, info.clone())
+                }
+                RespCommand::PSYNC(string, pos) => handle_psync_command(string, pos, info.clone()),
             };
             println!("Sending: {:?}", &response_value);
 
@@ -87,6 +90,9 @@ async fn main() -> std::io::Result<()> {
         Ok(())
     }
 
+    fn handle_psync_command(_string: String, _pos: i64, info: Arc<ServerInfo>) -> RespValue {
+        RespValue::SimpleString(format!("FULLRESYNC {} 0", info.master_replid).into())
+    }
     fn handle_replconf_command(_command: ReplconfCommand, _rdb: Arc<ServerInfo>) -> RespValue {
         RespValue::SimpleString("OK".into())
     }

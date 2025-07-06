@@ -27,6 +27,7 @@ pub enum RespCommand {
     Keys(String),
     Info(String),
     ReplconfCommand(ReplconfCommand),
+    PSYNC(String, i64),
 }
 
 impl RespCommand {
@@ -87,6 +88,7 @@ impl Command {
             "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
             "info" => Ok(RespCommand::Info(command.args[0].clone())),
             "replconf" => parse_replconf(command),
+            "psync" => parse_psync(command),
             other => invalid_data(format!("Unexpected Command: {}", other)),
         };
     }
@@ -121,23 +123,25 @@ fn parse_replconf(command: Command) -> io::Result<RespCommand> {
     };
     match action.to_ascii_lowercase().as_str() {
         "listening-port" => {
-             let port = command
+            let port = command
                 .args
                 .get(1)
                 .ok_or_else(|| invalid_data_err("Missing Port Field"))?;
-            Ok(RespCommand::ReplconfCommand(ReplconfCommand::ListeningPort(port.clone())))
+            Ok(RespCommand::ReplconfCommand(
+                ReplconfCommand::ListeningPort(port.clone()),
+            ))
         }
 
         "capa" => {
-             let capa = command
+            let capa = command
                 .args
                 .get(1)
                 .ok_or_else(|| invalid_data_err("Missing Capa fields"))?;
-            Ok(RespCommand::ReplconfCommand(ReplconfCommand::Capa(capa.clone())))
+            Ok(RespCommand::ReplconfCommand(ReplconfCommand::Capa(
+                capa.clone(),
+            )))
         }
-        _ => {
-            invalid_data("Unknown Replconf action")
-        }
+        _ => invalid_data("Unknown Replconf action"),
     }
 }
 
@@ -155,6 +159,17 @@ fn parse_config(command: Command) -> Result<RespCommand, io::Error> {
             Ok(RespCommand::ConfigCommand(ConfigCommand::Get(key.clone())))
         }
         _ => invalid_data("Unknown CONFIG action"),
+    }
+}
+
+fn parse_psync(command: Command) -> Result<RespCommand, io::Error> {
+    if command.args.len() < 2 {
+        return invalid_data("Unknown CONFIG action");
+    } else {
+        let pos = command.args[1]
+            .parse::<i64>()
+            .map_err(|_| invalid_data_err("Parsing Error with psync command"))?;
+        Ok(RespCommand::PSYNC(command.args[0].clone(), pos))
     }
 }
 
