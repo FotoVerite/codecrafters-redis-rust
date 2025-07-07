@@ -37,6 +37,11 @@ impl ReplicationManager {
         Ok(())
     }
 
+    pub async fn replica_count(&mut self) -> io::Result<(usize)> {
+        let len = self.replicas.lock().await.len();
+        Ok(len)
+    }
+
     pub async fn send_to_replicas(&self, command: RespCommand) -> io::Result<()> {
         let replicas_guard = self.replicas.lock().await; // Lock the mutex asynchronously
         for (key, replica) in replicas_guard.iter() {
