@@ -18,16 +18,18 @@ impl Entry {
     }
 }
 type SharedStore = Arc<RwLock<HashMap<String, Entry>>>;
-
+type Log = Arc<RwLock<Vec<u8>>>;
 #[derive(Debug, Clone)]
 pub struct Store {
     data: SharedStore,
+    log: Log,
 }
 
 impl Store {
     pub fn new() -> Self {
         Self {
             data: Arc::new(RwLock::new(HashMap::new())),
+            log: Arc::new(RwLock::new(vec![])),
         }
     }
 
@@ -80,5 +82,15 @@ impl Store {
     pub async fn del(&self, key: &str) {
         let mut map = self.data.write().await;
         map.remove(key);
+    }
+
+    pub async fn append_to_log(&self, bytes: Vec<u8>) {
+        let mut log = self.log.write().await;
+        log.extend(bytes);
+    }
+
+    pub async fn get_offset(&self) -> usize {
+        let log = self.log.read().await;
+        log.len()
     }
 }

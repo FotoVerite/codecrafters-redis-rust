@@ -22,15 +22,14 @@ pub async fn handle_replication_connection(
     store: Arc<Store>,
     info: Arc<ServerInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    
     while let Some(result) = framed.next().await {
-        dbg!(&result);
-        let resp_value = result?;
-        dbg!(&resp_value);
-        let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
+        let (resp_value, bytes) = result?;
+        let command = command::Command::try_from_resp(resp_value)?;
         let response = match command {
             RespCommand::Set { key, value, px } => {
                 store.set(&key, value, px).await;
+                store.append_to_log(bytes).await;
+
                 None
             }
             RespCommand::Get(key) => Some(store.get(&key).await),
@@ -38,10 +37,17 @@ pub async fn handle_replication_connection(
             RespCommand::Info(string) => Some(handle_info_command(string, info.clone())),
             // The master might send PINGs to check the connection
             RespCommand::Ping => {
+                store.append_to_log(bytes).await;
                 None // Slaves don't typically respond to PINGs from the master in this context
             }
             RespCommand::ReplconfCommand(ReplconfCommand::Getack(string)) => {
-                handle_ack_command(string)
+                //store.append_to_log(bytes).await;
+                let resp = handle_ack_command(string, store.clone()).await;
+                if let Some(value) = resp {
+                    framed.send(value).await?;
+                    store.append_to_log(bytes).await;
+                }
+                None
             }
             _ => {
                 None // Handle other commands from the master if necessary
@@ -55,7 +61,6 @@ pub async fn handle_replication_connection(
     Ok(())
 }
 
-
 pub async fn handle_master_connection(
     socket: TcpStream,
     store: Arc<Store>,
@@ -66,7 +71,7 @@ pub async fn handle_master_connection(
     let mut framed = Framed::new(socket, resp::RespCodec);
     let mut peer_addr = None;
     while let Some(result) = framed.next().await {
-        let resp_value = result?;
+        let (resp_value, _) = result?;
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
         if let RespCommand::PSYNC(string, pos) = command.clone() {
@@ -164,14 +169,14 @@ fn handle_replconf_command(
     RespValue::SimpleString("OK".into())
 }
 
-fn handle_ack_command(string: String) -> Option<RespValue> {
+async fn handle_ack_command(string: String, store: Arc<Store>) -> Option<RespValue> {
     match string.to_ascii_lowercase().as_str() {
         "*" => {
             let mut values = vec![];
             values.push(RespValue::BulkString(Some("REPLCONF".into())));
             values.push(RespValue::BulkString(Some("ACK".into())));
-
-            values.push(RespValue::BulkString(Some("0".into())));
+            let length = store.get_offset().await;
+            values.push(RespValue::BulkString(Some(length.to_string().into())));
 
             return Some(RespValue::Array(values));
         }
@@ -205,7 +210,7 @@ async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
     }
 }
 
-pub async fn debug_peek_handshake( stream: TcpStream) -> std::io::Result<TcpStream> {
+pub async fn debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStream> {
     let mut reader = BufReader::new(stream);
 
     // Peek into the handshake response

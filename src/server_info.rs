@@ -159,7 +159,7 @@ impl ServerInfo {
                     RespValue::BulkString(Some("-1".into())),
                 ]))
                 .await?;
-            if let Some(Ok(RespValue::SimpleString(fullresync_line))) = framed.next().await {
+            if let Some(Ok((RespValue::SimpleString(fullresync_line), _))) = framed.next().await {
                 if !fullresync_line.starts_with("FULLRESYNC") {
                     return Err("Expected +FULLRESYNC line".into());
                 }
@@ -167,8 +167,6 @@ impl ServerInfo {
             } else {
                 return Err("Expected +FULLRESYNC line".into());
             }
-
-            
 
             return Ok(Some((framed, vec![])));
         }

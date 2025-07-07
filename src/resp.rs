@@ -15,31 +15,22 @@ pub enum RespValue {
 pub struct RespCodec;
 
 impl Decoder for RespCodec {
-    type Item = RespValue; // You can use a custom enum if you want structured RESP commands
+    type Item = (RespValue, Vec<u8>); // Include raw bytes
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // Check if we have a full line ending in \r\n
+        let mut shadow = src.clone();
+        let before_len = shadow.len();
+
         if src.is_empty() {
             return Ok(None);
         }
-        if let Some(chr) = src.get(0) {
-            match chr {
-                b'+' => return simple_string(src),
-                b'-' => return error_string(src),
+        if let Some(resp) = self.parse_bytes(src)? {
+            let used_len = before_len - src.len();
 
-                b':' => return int_string(src),
-
-                b'$' => return bulk_string(src),
-                b'*' => return self.parse_array(src),
-
-                other => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Unknown RESP type {}", other),
-                    ))
-                }
-            }
+            let raw_bytes = shadow.split_to(used_len).to_vec(); // advance past the frame and extract only what's used
+            return Ok(Some((resp, raw_bytes)));
         }
         Ok(None)
     }
@@ -137,7 +128,7 @@ impl RespCodec {
             let size = parse_integer(size_string.as_str())?;
             let mut ret = Vec::with_capacity(size as usize);
             for _ in 0..size {
-                if let Some(val) = self.decode(src)? {
+                if let Some((val, _)) = self.decode(src)? {
                     ret.push(val);
                 } else {
                     return Ok(None);
@@ -159,6 +150,28 @@ impl RespCodec {
             self.encode(value, dst)?
         }
         Ok(())
+    }
+
+    fn parse_bytes(&mut self, src: &mut BytesMut) -> io::Result<Option<RespValue>> {
+        if let Some(chr) = src.get(0) {
+            match chr {
+                b'+' => return simple_string(src),
+                b'-' => return error_string(src),
+
+                b':' => return int_string(src),
+
+                b'$' => return bulk_string(src),
+                b'*' => return self.parse_array(src),
+
+                other => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Unknown RESP type {}", other),
+                    ))
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
