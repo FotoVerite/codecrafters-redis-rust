@@ -25,6 +25,7 @@ pub async fn handle_replication_connection(
     let mut framed = Framed::new(socket, resp::RespCodec);
     
     while let Some(result) = framed.next().await {
+        dbg!(&result);
         let resp_value = result?;
         dbg!(&resp_value);
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
