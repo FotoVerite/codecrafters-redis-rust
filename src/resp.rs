@@ -7,7 +7,8 @@ pub enum RespValue {
     SimpleString(String),
     Error(String),
     Integer(i64),
-    BulkString(Option<Vec<u8>>), // None = $-1
+    BulkString(Option<Vec<u8>>),
+    RDB(Option<Vec<u8>>), // None = $-1 // None = $-1
     Array(Vec<RespValue>),
 }
 
@@ -32,10 +33,10 @@ impl Decoder for RespCodec {
                 b'$' => return bulk_string(src),
                 b'*' => return self.parse_array(src),
 
-                _ => {
+                other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Unknown RESP type",
+                        format!("Unknown RESP type {}", other),
                     ))
                 }
             }
@@ -69,19 +70,34 @@ fn parse_resp_line(src: &mut BytesMut) -> Result<Option<String>, io::Error> {
 }
 
 fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<Vec<u8>>, io::Error> {
-    if src.len() < pos + 2 {
-        return Ok(None);
+    if src.windows(5).any(|w| w == b"REDIS") {
+        // If buffer too short to reach 'pos', wait for more
+        if src.len() < pos {
+            return Ok(None);
+        }
+        // Don't split *before* REDIS magic — split *up to* pos, keep the rest including REDIS
+        // So maybe pos is the start of REDIS? If so, better to just return None to wait for full data
+        // Or split off the prefix before REDIS and return it
+        let prefix = src.split_to(pos);
+        return Ok(Some(prefix.to_vec()));
+    } else {
+        // Need at least pos + 2 bytes for CRLF
+        if src.len() < pos + 2 {
+            return Ok(None);
+        }
+
+        let line = src.split_to(pos);
+        let crlf = src.split_to(2);
+
+        if &crlf[..] != b"\r\n" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Expected CRLF after bulk string",
+            ));
+        }
+
+        return Ok(Some(line.to_vec()));
     }
-    let line = src.split_to(pos);
-    let crlf = src.split_to(2);
-    if &crlf[..] != b"\r\n" {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Expected CRLF after bulk string",
-        ));
-    }
-    let vec = line.to_vec();
-    return Ok(Some(vec));
 }
 fn simple_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
     if let Some(string) = parse_resp_line(src)? {
@@ -141,7 +157,11 @@ impl RespCodec {
         Ok(None)
     }
 
-    pub fn write_array(&mut self, dst: &mut BytesMut, values: Vec<RespValue>) -> Result<(), io::Error> {
+    pub fn write_array(
+        &mut self,
+        dst: &mut BytesMut,
+        values: Vec<RespValue>,
+    ) -> Result<(), io::Error> {
         dst.put_u8(b'*');
         dst.extend_from_slice(format!("{}\r\n", values.len()).as_bytes());
         for value in values {
@@ -161,6 +181,7 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
             RespValue::BulkString(c) => write_bulk_string(dst, c),
             RespValue::Array(values) => self.write_array(dst, values),
+            RespValue::RDB(binary) => {Ok(())}
         }
     }
 }

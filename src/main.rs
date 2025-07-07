@@ -73,19 +73,25 @@ async fn main() -> std::io::Result<()> {
             let replication_manager_clone_for_handshake = replication_manager.clone();
 
             tokio::spawn(async move {
-                if let Ok(Some(socket)) = info_clone_for_handshake.handshake().await {
-                    println!("Handshake successful, connected to master.");
-                    if let Err(e) = handlers::handle_replication_connection(
-                        socket,
-                        store_clone_for_handshake,
-                        info_clone_for_handshake,
-                    )
-                    .await
-                    {
-                        eprintln!("Error in connection with master: {:?}", e);
+                match info_clone_for_handshake.handshake().await {
+                    Ok(Some((socket, other))) => {
+                        println!("Handshake successful, connected to master.");
+                        if let Err(e) = handlers::handle_replication_connection(
+                            socket.into_inner(),
+                            store_clone_for_handshake,
+                            info_clone_for_handshake,
+                        )
+                        .await
+                        {
+                            eprintln!("Error in connection with master: {:?}", e);
+                        }
                     }
-                } else {
-                    eprintln!("Handshake with master failed.");
+                    Ok(None) => {
+                        eprintln!("Handshake returned Ok(None) - no socket available.");
+                    }
+                    Err(e) => {
+                        eprintln!("Handshake with master failed with error: {:?}", e);
+                    }
                 }
             });
 
@@ -98,12 +104,9 @@ async fn main() -> std::io::Result<()> {
                 let replication_manager_clone = replication_manager.clone();
                 // Spawn a new async task to handle the client connection
                 tokio::spawn(async move {
-                    if let Err(e) = handlers::handle_replication_connection(
-                        socket,
-                        store_clone,
-                        info_clone,
-                    )
-                    .await
+                    if let Err(e) =
+                        handlers::handle_replication_connection(socket, store_clone, info_clone)
+                            .await
                     {
                         eprintln!("Error handling {}: {:?}", addr, e);
                     }
