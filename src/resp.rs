@@ -41,12 +41,6 @@ impl Decoder for RespCodec {
                 }
             }
         }
-        // if let Some(pos) = src.iter().position(|w| w == b"\r\n") {
-        //     let line = src.split_to(pos + 2);
-        //     let line_str = std::str::from_utf8(&line[..line.len() - 2])
-        //         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8"))?;
-        //     return Ok(Some(line_str.to_string()));
-        // }
         Ok(None)
     }
 }
@@ -79,7 +73,7 @@ fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<RespValue>, io
         // So maybe pos is the start of REDIS? If so, better to just return None to wait for full data
         // Or split off the prefix before REDIS and return it
         let prefix = src.split_to(pos);
-        return Ok(None);
+        return Ok(Some(RespValue::RDB(Some(prefix.to_vec()))));
     } else {
         // Need at least pos + 2 bytes for CRLF
         if src.len() < pos + 2 {
@@ -132,7 +126,7 @@ fn bulk_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
         if bytes == -1 {
             return Ok(Some(RespValue::BulkString(None)));
         }
-        return Ok(digest_stream(src, bytes as usize)?)
+        return Ok(digest_stream(src, bytes as usize)?);
     }
     Ok(None)
 }
@@ -178,7 +172,7 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
             RespValue::BulkString(c) => write_bulk_string(dst, c),
             RespValue::Array(values) => self.write_array(dst, values),
-            RespValue::RDB(binary) => {Ok(())}
+            RespValue::RDB(binary) => Ok(()),
         }
     }
 }

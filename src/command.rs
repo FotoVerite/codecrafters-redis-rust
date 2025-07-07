@@ -28,6 +28,7 @@ pub enum RespCommand {
     Keys(String),
     Info(String),
     ReplconfCommand(ReplconfCommand),
+    RDB(Option<Vec<u8>>),
     PSYNC(String, i64),
 }
 
@@ -71,27 +72,28 @@ impl Command {
     }
 
     pub fn try_from_resp(value: RespValue) -> Result<RespCommand, io::Error> {
-        let command = match value {
-            RespValue::Array(a) => Command::new(a)?,
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Expected Top Level Array",
-                ))
+        match value {
+            RespValue::RDB(info) => Ok(RespCommand::RDB(info)),
+            RespValue::Array(a) => {
+                let command = Command::new(a)?;
+                match command.name.to_ascii_lowercase().as_str() {
+                    "ping" => Ok(RespCommand::Ping),
+                    "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
+                    "get" => Ok(RespCommand::Get(command.args[0].clone())),
+                    "set" => parse_set(command),
+                    "config" => parse_config(command),
+                    "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
+                    "info" => Ok(RespCommand::Info(command.args[0].clone())),
+                    "replconf" => parse_replconf(command),
+                    "psync" => parse_psync(command),
+                    other => invalid_data(format!("Unexpected Command: {}", other)),
+                }
             }
-        };
-        return match command.name.to_ascii_lowercase().as_str() {
-            "ping" => Ok(RespCommand::Ping),
-            "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
-            "get" => Ok(RespCommand::Get(command.args[0].clone())),
-            "set" => parse_set(command),
-            "config" => parse_config(command),
-            "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
-            "info" => Ok(RespCommand::Info(command.args[0].clone())),
-            "replconf" => parse_replconf(command),
-            "psync" => parse_psync(command),
-            other => invalid_data(format!("Unexpected Command: {}", other)),
-        };
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Expected Top Level Array",
+            )),
+        }
     }
 }
 

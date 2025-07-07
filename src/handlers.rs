@@ -109,6 +109,7 @@ pub async fn handle_master_connection(
                 info.clone(),
                 &mut peer_addr,
             )),
+            RespCommand::RDB(_) => None,
             RespCommand::PSYNC(_, _) => unreachable!(), // Should be handled above
         };
 
