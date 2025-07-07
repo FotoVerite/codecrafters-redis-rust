@@ -10,6 +10,7 @@ mod shared_store;
 use std::sync::Arc;
 
 use tokio::{net::TcpListener, sync::Mutex};
+use tokio_util::codec::Framed;
 
 use crate::{
     rdb::config::RdbConfig, replication_manager::manager::ReplicationManager,
@@ -74,10 +75,10 @@ async fn main() -> std::io::Result<()> {
 
             tokio::spawn(async move {
                 match info_clone_for_handshake.handshake().await {
-                    Ok(Some((socket, other))) => {
+                    Ok(Some((mut socket, other))) => {
                         println!("Handshake successful, connected to master.");
                         if let Err(e) = handlers::handle_replication_connection(
-                            socket.into_inner(),
+                            &mut socket,
                             store_clone_for_handshake,
                             info_clone_for_handshake,
                         )
@@ -104,9 +105,14 @@ async fn main() -> std::io::Result<()> {
                 let replication_manager_clone = replication_manager.clone();
                 // Spawn a new async task to handle the client connection
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        handlers::handle_replication_connection(socket, store_clone, info_clone)
-                            .await
+                    let mut framed = Framed::new(socket, resp::RespCodec);
+
+                    if let Err(e) = handlers::handle_replication_connection(
+                        &mut framed,
+                        store_clone,
+                        info_clone,
+                    )
+                    .await
                     {
                         eprintln!("Error handling {}: {:?}", addr, e);
                     }

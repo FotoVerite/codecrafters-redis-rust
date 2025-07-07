@@ -18,11 +18,10 @@ use crate::{
 };
 
 pub async fn handle_replication_connection(
-    socket: TcpStream,
+    framed: &mut Framed<TcpStream, RespCodec>,
     store: Arc<Store>,
     info: Arc<ServerInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut framed = Framed::new(socket, resp::RespCodec);
     
     while let Some(result) = framed.next().await {
         dbg!(&result);
