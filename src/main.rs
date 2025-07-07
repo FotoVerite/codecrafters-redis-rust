@@ -75,11 +75,9 @@ async fn main() -> std::io::Result<()> {
             tokio::spawn(async move {
                 if let Ok(Some(socket)) = info_clone_for_handshake.handshake().await {
                     println!("Handshake successful, connected to master.");
-                    if let Err(e) = handlers::handle_master_connection(
+                    if let Err(e) = handlers::handle_replication_connection(
                         socket,
                         store_clone_for_handshake,
-                        rdb_clone_for_handshake,
-                        replication_manager_clone_for_handshake,
                         info_clone_for_handshake,
                     )
                     .await
@@ -100,11 +98,9 @@ async fn main() -> std::io::Result<()> {
                 let replication_manager_clone = replication_manager.clone();
                 // Spawn a new async task to handle the client connection
                 tokio::spawn(async move {
-                    if let Err(e) = handlers::handle_master_connection(
+                    if let Err(e) = handlers::handle_replication_connection(
                         socket,
                         store_clone,
-                        rdb_clone,
-                        replication_manager_clone,
                         info_clone,
                     )
                     .await

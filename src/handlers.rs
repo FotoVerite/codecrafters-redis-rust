@@ -1,7 +1,11 @@
 use std::{io, sync::Arc};
 
 use futures::{SinkExt, StreamExt};
-use tokio::{io::AsyncWriteExt, net::TcpStream, sync::Mutex};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+    sync::Mutex,
+};
 use tokio_util::codec::Framed;
 
 use crate::{
@@ -12,6 +16,45 @@ use crate::{
     server_info::ServerInfo,
     shared_store::Store,
 };
+
+pub async fn handle_replication_connection(
+    socket: TcpStream,
+    store: Arc<Store>,
+    info: Arc<ServerInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut framed = Framed::new(socket, resp::RespCodec);
+    
+    while let Some(result) = framed.next().await {
+        let resp_value = result?;
+        dbg!(&resp_value);
+        let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
+        let response = match command {
+            RespCommand::Set { key, value, px } => {
+                store.set(&key, value, px).await;
+                None
+            }
+            RespCommand::Get(key) => Some(store.get(&key).await),
+
+            RespCommand::Info(string) => Some(handle_info_command(string, info.clone())),
+            // The master might send PINGs to check the connection
+            RespCommand::Ping => {
+                None // Slaves don't typically respond to PINGs from the master in this context
+            }
+            RespCommand::ReplconfCommand(ReplconfCommand::Getack(string)) => {
+                handle_ack_command(string)
+            }
+            _ => {
+                None // Handle other commands from the master if necessary
+            }
+        };
+        if let Some(value) = response {
+            framed.send(value).await?;
+        }
+    }
+
+    Ok(())
+}
+
 
 pub async fn handle_master_connection(
     socket: TcpStream,
@@ -98,6 +141,7 @@ async fn handle_psync_command(
     let header = format!("${}\r\n", rdb_bytes.len());
     stream.write_all(header.as_bytes()).await?;
     stream.write_all(rdb_bytes.as_slice()).await?;
+
     stream.flush().await?;
     manager
         .lock()
@@ -119,6 +163,20 @@ fn handle_replconf_command(
     RespValue::SimpleString("OK".into())
 }
 
+fn handle_ack_command(string: String) -> Option<RespValue> {
+    match string.to_ascii_lowercase().as_str() {
+        "*" => {
+            let mut values = vec![];
+            values.push(RespValue::BulkString(Some("REPLCONF".into())));
+            values.push(RespValue::BulkString(Some("ACK".into())));
+
+            values.push(RespValue::BulkString(Some("0".into())));
+
+            return Some(RespValue::Array(values));
+        }
+        _ => return None,
+    };
+}
 fn handle_config_command(command: ConfigCommand, rdb: Arc<RdbConfig>) -> RespValue {
     match command {
         ConfigCommand::Get(key) => {
@@ -144,4 +202,22 @@ async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
         "*" => store.keys().await,
         other => RespValue::Array(vec![]),
     }
+}
+
+pub async fn debug_peek_handshake( stream: TcpStream) -> std::io::Result<TcpStream> {
+    let mut reader = BufReader::new(stream);
+
+    // Peek into the handshake response
+    let buf = reader.fill_buf().await?;
+    println!(
+        "[debug] Peeked handler bytes: {:02X?}",
+        &buf[..buf.len().min(64)]
+    );
+
+    // Optionally consume nothing
+    // reader.consume(buf.len());
+
+    // Recover the TcpStream from BufReader
+    let stream = reader.into_inner();
+    Ok(stream)
 }

@@ -1,8 +1,9 @@
-use std::io::{self};
+use std::io::{self, BufRead};
 
 use futures::{SinkExt, StreamExt};
+use std::io::Read;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
 };
 use tokio_util::codec::Framed;
@@ -112,7 +113,9 @@ impl ServerInfo {
         )
     }
 
-    pub async fn handshake(&self) -> io::Result<Option<TcpStream>> {
+    pub async fn handshake(
+        &self,
+    ) -> Result<Option<TcpStream>, Box<dyn std::error::Error + Send + Sync>> {
         if self.role.as_str() == "master" {
             return Ok(None);
         }
@@ -153,8 +156,27 @@ impl ServerInfo {
                     RespValue::BulkString(Some("-1".into())),
                 ]))
                 .await?;
-            let _ = framed.next().await;
-            return Ok(Some(framed.into_inner()))
+            if let Some(Ok(RespValue::SimpleString(fullresync_line))) = framed.next().await {
+                println!("Got FULLRESYNC: {}", fullresync_line);
+            } else {
+                return Err("Expected +FULLRESYNC line".into());
+            }
+
+            // read RDB bulk string
+            // if let Some(Ok(RespValue::BulkString(Some(rdb_bytes)))) = framed.next().await {
+            //     // rdb_bytes is the entire RDB payload
+            //     println!("Got RDB of length {}", rdb_bytes.len());
+            // } else {
+            //     println!("Expected bulk string with RDB");
+            //     return Err("Expected bulk string with RDB".into());
+            // }
+
+            // Extract the stream back from the framed object before peeking
+          
+
+            let mut socket = framed.into_inner();
+            let _rdb = read_rdb_from_master(&mut socket).await?;
+            return Ok(Some(socket));
         }
         Ok(None)
     }
@@ -188,4 +210,50 @@ fn parse_repl_instance(
         )
     }
     Ok(())
+}
+
+pub async fn debug_peek_handshake( stream: TcpStream) -> std::io::Result<TcpStream> {
+    let mut reader = BufReader::new(stream);
+
+    // Peek into the handshake response
+    let buf = reader.fill_buf().await?;
+    println!(
+        "[debug] Peeked handshake bytes: {:02X?}",
+        &buf[..buf.len().min(64)]
+    );
+
+    // Optionally consume nothing
+    // reader.consume(buf.len());
+
+    // Recover the TcpStream from BufReader
+    let stream = reader.into_inner();
+    Ok(stream)
+}
+
+async fn read_rdb_from_master(
+    stream: &mut TcpStream,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut buf = Vec::new();
+    loop {
+        let mut byte = [0u8; 1];
+        let n = stream.read(&mut byte).await?;
+        if n == 0 {
+            return Err(Box::<dyn std::error::Error + Send + Sync>::from("Connection closed"));
+        }
+        buf.push(byte[0]);
+        let len = buf.len();
+        if len >= 2 && buf[len - 2..] == *b"\r\n" {
+            break;
+        }
+    }
+    if buf.first() != Some(&b'$') {
+        Err(Box::<dyn std::error::Error + Send + Sync>::from("Expected RESP bulk string"))
+    } else {
+        let len_str = std::str::from_utf8(&buf[1..buf.len() - 2])?;
+        let rdb_len: usize = len_str.parse()?;
+        // strip `$` and `\r\n`
+        let mut rdb = vec![0u8; rdb_len];
+        stream.read_exact(&mut rdb).await?;
+        Ok(rdb)
+    }
 }
