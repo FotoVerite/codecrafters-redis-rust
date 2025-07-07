@@ -12,6 +12,7 @@ use crate::{
     resp::{RespCodec, RespValue},
 };
 
+#[derive(Debug, Clone)]
 pub struct ServerInfo {
     pub redis_version: String,
     pub redis_mode: String,
@@ -111,9 +112,9 @@ impl ServerInfo {
         )
     }
 
-    pub async fn handshake(&self) -> io::Result<()> {
+    pub async fn handshake(&self) -> io::Result<Option<TcpStream>> {
         if self.role.as_str() == "master" {
-            return Ok(());
+            return Ok(None);
         }
         if let (Some(host), Some(port)) = (&self.repl_host, self.repl_port) {
             let mut stream = TcpStream::connect((host.as_str(), port)).await?;
@@ -153,8 +154,9 @@ impl ServerInfo {
                 ]))
                 .await?;
             let _ = framed.next().await;
+            return Ok(Some(framed.into_inner()))
         }
-        Ok(())
+        Ok(None)
     }
 }
 
