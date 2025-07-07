@@ -1,6 +1,6 @@
 use futures::io;
 
-use crate::resp::RespValue;
+use crate::resp::{self, RespValue};
 
 #[derive(Debug, Clone)]
 pub enum ConfigCommand {
@@ -30,6 +30,7 @@ pub enum RespCommand {
     ReplconfCommand(ReplconfCommand),
     RDB(Option<Vec<u8>>),
     PSYNC(String, i64),
+    Wait(String, String),
 }
 
 impl RespCommand {
@@ -86,6 +87,7 @@ impl Command {
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
                     "psync" => parse_psync(command),
+                    "wait" => Ok(RespCommand::Wait(command.args[0].clone(), command.args[1].clone())),
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }
