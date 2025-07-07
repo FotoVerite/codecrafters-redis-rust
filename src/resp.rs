@@ -69,7 +69,7 @@ fn parse_resp_line(src: &mut BytesMut) -> Result<Option<String>, io::Error> {
     Ok(None)
 }
 
-fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<Vec<u8>>, io::Error> {
+fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<RespValue>, io::Error> {
     if src.windows(5).any(|w| w == b"REDIS") {
         // If buffer too short to reach 'pos', wait for more
         if src.len() < pos {
@@ -79,7 +79,7 @@ fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<Vec<u8>>, io::
         // So maybe pos is the start of REDIS? If so, better to just return None to wait for full data
         // Or split off the prefix before REDIS and return it
         let prefix = src.split_to(pos);
-        return Ok(Some(prefix.to_vec()));
+        return Ok(None);
     } else {
         // Need at least pos + 2 bytes for CRLF
         if src.len() < pos + 2 {
@@ -95,8 +95,8 @@ fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<Vec<u8>>, io::
                 "Expected CRLF after bulk string",
             ));
         }
-
-        return Ok(Some(line.to_vec()));
+        let resp = RespValue::BulkString(Some(line.to_vec()));
+        return Ok(Some(resp));
     }
 }
 fn simple_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
@@ -132,10 +132,7 @@ fn bulk_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
         if bytes == -1 {
             return Ok(Some(RespValue::BulkString(None)));
         }
-        if let Some(bulk) = digest_stream(src, bytes as usize)? {
-            let resp = RespValue::BulkString(Some(bulk));
-            return Ok(Some(resp));
-        }
+        return Ok(digest_stream(src, bytes as usize)?)
     }
     Ok(None)
 }
