@@ -40,6 +40,11 @@ pub enum RespCommand {
         id: String, // Can be "*" or an explicit "1688512345678-0"
         fields: Vec<(String, String)>,
     },
+    Xrange {
+        key: String,
+        start: Option<String>,
+        end: Option<String>,
+    },
 }
 
 impl RespCommand {
@@ -102,6 +107,7 @@ impl Command {
                         command.args[1].clone(),
                     )),
                     "xadd" => parse_xadd(command),
+                    "xrange" => parse_xrange(command),
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }
@@ -128,6 +134,18 @@ fn parse_xadd(command: Command) -> Result<RespCommand, io::Error> {
         .collect();
 
     Ok(RespCommand::Xadd { key, id, fields })
+}
+
+fn parse_xrange(command: Command) -> Result<RespCommand, io::Error> {
+    let key = command.args[0].clone();
+    let mut range = command.args.iter().skip(1);
+    let start = range.next().cloned();
+    let end: Option<String> = range.next().cloned();
+    Ok(RespCommand::Xrange {
+        key,
+        start,
+        end,
+    })
 }
 
 fn parse_set(command: Command) -> Result<RespCommand, io::Error> {

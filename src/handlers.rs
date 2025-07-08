@@ -1,6 +1,6 @@
 use std::{io, sync::Arc, time::Duration};
 
-use futures::{SinkExt, StreamExt};
+use futures::{stream::iter, SinkExt, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{tcp::OwnedWriteHalf, TcpStream},
@@ -16,7 +16,7 @@ use crate::{
     replication_manager::manager::ReplicationManager,
     resp::{self, RespCodec, RespValue},
     server_info::ServerInfo,
-    shared_store::shared_store::Store,
+    shared_store::{redis_stream::StreamEntry, shared_store::Store},
 };
 
 pub async fn handle_replication_connection(
@@ -153,6 +153,34 @@ pub async fn handle_master_connection(
                     Err(e) => Some(RespValue::Error(e.to_string())),
                 }
             } // Should be handled above
+            RespCommand::Xrange { key, start, end } => {
+                let resp = store.xrange(key, start, end).await?;
+                let mut outter = vec![];
+                for (_, entry) in resp {
+                    match entry {
+                        StreamEntry::Data { id, fields } => {
+                            let bulkstring_id = RespValue::BulkString(Some(id.to_string().into()));
+                            let field_array = {
+                                let values = {
+                                    fields
+                                        .iter()
+                                        .flat_map(|(k, v)| {
+                                            vec![
+                                                RespValue::BulkString(Some(k.clone().into())),
+                                                RespValue::BulkString(Some(v.clone().into())),
+                                            ]
+                                        })
+                                        .collect()
+                                };
+                                RespValue::Array(values)
+                            };
+                            outter.push(RespValue::Array(vec![bulkstring_id, field_array]));
+                        }
+                        _ => {}
+                    }
+                }
+                Some(RespValue::Array(outter))
+            }
         };
 
         println!("Sending: {:?}", &response_value);

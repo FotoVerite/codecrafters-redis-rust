@@ -20,7 +20,6 @@ pub async fn send_heartbeat(
 
     let mut ticker = interval(Duration::from_millis(200));
     loop {
-        dbg!("sending heartbeat");
 
         ticker.tick().await;
 
@@ -31,7 +30,6 @@ pub async fn send_heartbeat(
             RespValue::BulkString(Some(b"ACK".to_vec())),
             RespValue::BulkString(Some(offset.to_string().into_bytes())),
         ]);
-        dbg!("sending");
         let mut guard = framed.lock().await;
         guard.send(ack_command).await?;
     }

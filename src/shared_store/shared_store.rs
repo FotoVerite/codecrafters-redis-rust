@@ -1,13 +1,14 @@
 use futures::io;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
 use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
-use crate::shared_store::redis_stream::{Stream, StreamEntry};
+use crate::shared_store::redis_stream::{Stream, StreamEntries};
+use crate::shared_store::stream_id::StreamID;
 
 #[derive(Debug, Clone)]
 pub enum RedisValue {
@@ -113,6 +114,36 @@ impl Store {
         map.insert(key.to_string(), entry);
     }
 
+    pub async fn xrange(
+        &self,
+        key: String,
+        start: Option<String>,
+        end: Option<String>,
+    ) -> io::Result<StreamEntries> {
+        let map = self.keyspace.read().await;
+        match map.get(&key) {
+            Some(entry) => match &entry.value {
+                RedisValue::Stream(stream) => {
+                    let start: Option<StreamID> = match start {
+                        Some(s) => Some(s.as_str().try_into()?),
+                        None => None,
+                    };
+                    let end: Option<StreamID> = match end {
+                        Some(s) => Some(s.as_str().try_into()?),
+                        None => None,
+                    };
+
+                    let range = stream.get_range(start, end);
+                    Ok(range)
+                }
+                _ => Err(invalid_data_err(
+                    "ERR XRANGE on key holding the wrong kind of value",
+                )),
+            },
+            None => Ok(vec![]), // Return empty on missing key
+        }
+    }
+
     pub async fn xadd(
         &self,
         key: &str,
@@ -128,84 +159,19 @@ impl Store {
                     return Err(invalid_data_err("ERR calling Text Value with stream key"));
                 }
                 RedisValue::Stream(stream) => {
-                    let generated_id = Self::generate_id(&id, Some(stream.previous_id()))?;
-                    dbg!(&generated_id);
-                    Self::validate_id(&generated_id, stream.previous_id())?;
-                    stream.append(generated_id.clone(), fields);
-                    Ok(generated_id)
+                    let stream_id: StreamID =
+                        StreamID::from_redis_input(Some(*stream.previous_id()), id)?;
+                    stream.append(stream_id.clone(), fields)?;
+                    Ok(stream_id.to_string())
                 }
             }
         } else {
-            let generated_id = Self::generate_id(&id, None)?;
-            dbg!(&generated_id);
-            Self::validate_id(&generated_id, "0-0")?;
+            let stream_id: StreamID = StreamID::from_redis_input(None, id)?;
             let mut stream = Stream::new();
-            stream.append(generated_id.clone(), fields);
+            stream.append(stream_id.clone(), fields)?;
             let entry = Entry::new(RedisValue::Stream(stream), None);
             map.insert(key.to_string(), entry);
-            Ok(generated_id)
-        }
-    }
-
-    fn validate_id(id: &str, previous: &str) -> io::Result<bool> {
-        if id == "0-0" {
-            return Err(invalid_data_err(
-                "ERR The ID specified in XADD must be greater than 0-0",
-            ));
-        }
-        let (milli, incr) = parse_stream_id(id)?;
-        let (previous_milli, previous_incr) = parse_stream_id(previous)?;
-        if milli < previous_milli || milli == previous_milli && incr <= previous_incr {
-            return Err(invalid_data_err(
-                "ERR The ID specified in XADD is equal or smaller than the target stream top item",
-            ));
-        }
-        Ok(true)
-    }
-
-    fn generate_id(id: &String, previous: Option<&str>) -> io::Result<String> {
-        if id != "*" && !id.ends_with('*') {
-            return Ok(id.clone());
-        }
-        match id.as_str() {
-            "*" => {
-                let ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_millis() as u64;
-                let seq = if let Some(previous) = previous {
-                    let (prev_ms, prev_seq) = parse_stream_id(previous)?;
-                    if prev_ms == ms {
-                        prev_seq + 1
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                };
-                Ok(format!("{}-{}", ms, seq))
-            }
-            _ => {
-                let mut parts = id.splitn(2, '-');
-                let ms = parts
-                    .next()
-                    .ok_or_else(|| invalid_data_err("Invalid ID format"))?
-                    .parse::<u64>()
-                    .map_err(|_| invalid_data_err("Invalid milliseconds in stream ID"))?;
-                if let Some(previous) = previous {
-                    let (previous_ms, previous_incr) = parse_stream_id(previous)?;
-                    if ms == previous_ms {
-                        Ok(format!("{}-{}", ms, previous_incr + 1))
-                    } else {
-                        Ok(format!("{}-{}", ms, 0))
-                    }
-                } else {
-                    match ms {
-                        0 => Ok("0-1".into()),
-                        other => Ok(format!("{}-{}", other, 0)),
-                    }
-                }
-            }
+            Ok(stream_id.to_string())
         }
     }
 
@@ -223,21 +189,4 @@ impl Store {
         let log = self.log.read().await;
         log.len()
     }
-}
-
-fn parse_stream_id(id: &str) -> io::Result<(u64, u64)> {
-    let mut parts = id.splitn(2, '-');
-    let ms = parts
-        .next()
-        .ok_or_else(|| invalid_data_err("Invalid ID format"))?
-        .parse::<u64>()
-        .map_err(|_| invalid_data_err("Invalid milliseconds in stream ID"))?;
-
-    let seq = parts
-        .next()
-        .ok_or_else(|| invalid_data_err("Invalid ID format"))?
-        .parse::<u64>()
-        .map_err(|_| invalid_data_err("Invalid sequence in stream ID"))?;
-
-    Ok((ms, seq))
 }

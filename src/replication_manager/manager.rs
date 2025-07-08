@@ -27,7 +27,6 @@ impl ReplicationManager {
         socket: SocketAddr,
         writer: OwnedWriteHalf,
     ) -> io::Result<()> {
-        dbg!("called add_replica", &addr);
 
         let replica = Replica::new(socket, writer);
         self.replicas.lock().await.insert(addr.clone(), replica);
@@ -43,7 +42,6 @@ impl ReplicationManager {
 
     pub async fn replica_count(&self, offset: u64) -> io::Result<(usize)> {
         let guard = self.replicas.lock().await;
-        //dbg!(guard.values().map(|r| r.acknowledged_offset).collect::<Vec<_>>());
         let len = guard.values().filter(|r| r.acknowledged_offset >= offset).count();
         Ok(len)
     }

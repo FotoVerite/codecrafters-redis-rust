@@ -227,7 +227,6 @@ async fn read_rdb_from_master(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = BufReader::new(stream);
     let peek = reader.fill_buf().await?;
-    dbg!(&peek);
     if peek.first() == Some(&b'$') {
         if peek.windows(5).any(|w| w == b"REDIS") {
             println!("RDB magic number found inside peek buffer");

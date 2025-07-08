@@ -45,7 +45,6 @@ fn read_string<R: Read>(reader: &mut R, length: usize) -> Result<String, io::Err
 }
 
 fn read_integer<R: Read>(reader: &mut R, prefix: usize) -> Result<u64, io::Error> {
-    dbg!(prefix);
     match prefix {
         0 => {
             let mut buf = [0u8; 1];
