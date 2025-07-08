@@ -118,27 +118,32 @@ impl Store {
         key: &str,
         id: String,
         fields: Vec<(String, String)>,
-    ) -> io::Result<()> {
+    ) -> io::Result<String> {
         let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
             self.keyspace.write().await;
 
         if let Some(entry) = map.get_mut(key) {
             match &mut entry.value {
-                RedisValue::Text(_) => {}
+                RedisValue::Text(_) => {
+                    return Err(invalid_data_err("ERR calling Text Value with stream key"));
+                }
                 RedisValue::Stream(stream) => {
-                    Self::validate_id(&id, stream.previous_id())?;
-
-                    stream.append(id, fields);
+                    let generated_id = Self::generate_id(&id, Some(stream.previous_id()))?;
+                    dbg!(&generated_id);
+                    Self::validate_id(&generated_id, stream.previous_id())?;
+                    stream.append(generated_id.clone(), fields);
+                    Ok(generated_id)
                 }
             }
-            Ok(())
         } else {
-            Self::validate_id(&id, "0-0")?;
+            let generated_id = Self::generate_id(&id, None)?;
+            dbg!(&generated_id);
+            Self::validate_id(&generated_id, "0-0")?;
             let mut stream = Stream::new();
-            stream.append(id, fields);
+            stream.append(generated_id.clone(), fields);
             let entry = Entry::new(RedisValue::Stream(stream), None);
             map.insert(key.to_string(), entry);
-            Ok(())
+            Ok(generated_id)
         }
     }
 
@@ -150,12 +155,42 @@ impl Store {
         }
         let (milli, incr) = parse_stream_id(id)?;
         let (previous_milli, previous_incr) = parse_stream_id(previous)?;
-        if milli < previous_milli || incr <= previous_incr {
+        if milli < previous_milli || milli == previous_milli && incr <= previous_incr {
             return Err(invalid_data_err(
                 "ERR The ID specified in XADD is equal or smaller than the target stream top item",
             ));
         }
         Ok(true)
+    }
+
+    fn generate_id(id: &String, previous: Option<&str>) -> io::Result<String> {
+        if id != "*" && !id.ends_with('*') {
+            return Ok(id.clone());
+        }
+        match id.as_str() {
+            "*" => Ok("0-1".into()),
+            _ => {
+                let mut parts = id.splitn(2, '-');
+                let ms = parts
+                    .next()
+                    .ok_or_else(|| invalid_data_err("Invalid ID format"))?
+                    .parse::<u64>()
+                    .map_err(|_| invalid_data_err("Invalid milliseconds in stream ID"))?;
+                if let Some(previous) = previous {
+                    let (previous_ms, previous_incr) = parse_stream_id(previous)?;
+                    if ms == previous_ms {
+                        Ok(format!("{}-{}", ms, previous_incr + 1))
+                    } else {
+                        Ok(format!("{}-{}", ms, 0))
+                    }
+                } else {
+                    match ms {
+                        0 => Ok("0-1".into()),
+                        other => Ok(format!("{}-{}", other, 0)),
+                    }
+                }
+            }
+        }
     }
 
     // pub async fn del(&self, key: &str) {
