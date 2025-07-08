@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io;
-use std::ops::Bound::{Included, Unbounded};
+use std::ops::Bound::{Included, Unbounded, Excluded};
 
 use crate::error_helpers::invalid_data_err;
 use crate::shared_store::stream_id::StreamID;
@@ -27,7 +27,7 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn append(&mut self, id: StreamID, fields: Fields) -> io::Result<()>{
+    pub fn append(&mut self, id: StreamID, fields: Fields) -> io::Result<()> {
         let entry = StreamEntry::Data {
             id: id.clone(),
             fields,
@@ -53,7 +53,12 @@ impl Stream {
             entries: BTreeMap::new(),
         }
     }
-
+    pub fn get_from(&self, start: StreamID) -> StreamEntries {
+        self.entries
+            .range::<StreamID, _>((Excluded(start), Unbounded))
+            .map(|(id, entry)| (id.clone(), entry.clone()))
+            .collect()
+    }
     pub fn get_range(&self, start: Option<StreamID>, end: Option<StreamID>) -> StreamEntries {
         let lower = {
             match start {
@@ -74,7 +79,7 @@ impl Stream {
     }
 
     fn validate_id(id: &StreamID, previous: &StreamID) -> io::Result<bool> {
-        if id == &(StreamID {ms:0, seq: 0}) {
+        if id == &(StreamID { ms: 0, seq: 0 }) {
             return Err(invalid_data_err(
                 "ERR The ID specified in XADD must be greater than 0-0",
             ));

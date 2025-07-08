@@ -141,7 +141,7 @@ impl Store {
                             } else {
                                 Some(s.as_str().try_into()?)
                             }
-                        },
+                        }
                         None => None,
                     };
 
@@ -150,6 +150,22 @@ impl Store {
                 }
                 _ => Err(invalid_data_err(
                     "ERR XRANGE on key holding the wrong kind of value",
+                )),
+            },
+            None => Ok(vec![]), // Return empty on missing key
+        }
+    }
+
+    pub async fn xread(&self, key: String, start: String) -> io::Result<StreamEntries> {
+        let map = self.keyspace.read().await;
+        match map.get(&key) {
+            Some(entry) => match &entry.value {
+                RedisValue::Stream(stream) => {
+                    let range = stream.get_from(start.as_str().try_into()?);
+                    Ok(range)
+                }
+                _ => Err(invalid_data_err(
+                    "ERR XREAD on key holding the wrong kind of value",
                 )),
             },
             None => Ok(vec![]), // Return empty on missing key

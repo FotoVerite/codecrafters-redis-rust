@@ -16,7 +16,7 @@ use crate::{
     replication_manager::manager::ReplicationManager,
     resp::{self, RespCodec, RespValue},
     server_info::ServerInfo,
-    shared_store::{redis_stream::StreamEntry, shared_store::Store},
+    shared_store::{redis_stream::StreamEntry, shared_store::Store, stream_id::StreamID},
 };
 
 pub async fn handle_replication_connection(
@@ -155,31 +155,24 @@ pub async fn handle_master_connection(
             } // Should be handled above
             RespCommand::Xrange { key, start, end } => {
                 let resp = store.xrange(key, start, end).await?;
-                let mut outter = vec![];
-                for (_, entry) in resp {
-                    match entry {
-                        StreamEntry::Data { id, fields } => {
-                            let bulkstring_id = RespValue::BulkString(Some(id.to_string().into()));
-                            let field_array = {
-                                let values = {
-                                    fields
-                                        .iter()
-                                        .flat_map(|(k, v)| {
-                                            vec![
-                                                RespValue::BulkString(Some(k.clone().into())),
-                                                RespValue::BulkString(Some(v.clone().into())),
-                                            ]
-                                        })
-                                        .collect()
-                                };
-                                RespValue::Array(values)
-                            };
-                            outter.push(RespValue::Array(vec![bulkstring_id, field_array]));
-                        }
-                        _ => {}
-                    }
+                let outer = encode_stream(resp);
+                Some(RespValue::Array(outer))
+            }
+            RespCommand::Xread {
+                count,
+                block,
+                keys,
+                ids,
+            } => {
+                let mut outer = vec![];
+                for (key, id) in keys.iter().zip(ids) {
+                    let resp = store.xread(key.to_string(), id).await?;
+                    let inner = RespValue::Array(encode_stream(resp));
+                    let full = vec![RespValue::BulkString(Some(key.clone().into_bytes())), inner];
+                    outer.push(RespValue::Array(full));
+            
                 }
-                Some(RespValue::Array(outter))
+                Some(RespValue::Array(outer))
             }
         };
 
@@ -311,4 +304,32 @@ pub async fn debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStrea
     // Recover the TcpStream from BufReader
     let stream = reader.into_inner();
     Ok(stream)
+}
+
+fn encode_stream(resp: Vec<(StreamID, StreamEntry)>) -> Vec<RespValue> {
+    let mut outer = vec![];
+    for (_, entry) in resp {
+        match entry {
+            StreamEntry::Data { id, fields } => {
+                let bulkstring_id = RespValue::BulkString(Some(id.to_string().into()));
+                let field_array = {
+                    let values = {
+                        fields
+                            .iter()
+                            .flat_map(|(k, v)| {
+                                vec![
+                                    RespValue::BulkString(Some(k.clone().into())),
+                                    RespValue::BulkString(Some(v.clone().into())),
+                                ]
+                            })
+                            .collect()
+                    };
+                    RespValue::Array(values)
+                };
+                outer.push(RespValue::Array(vec![bulkstring_id, field_array]));
+            }
+            _ => {}
+        }
+    }
+    outer
 }

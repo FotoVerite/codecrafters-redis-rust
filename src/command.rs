@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use futures::io;
 
-use crate::resp::{self, RespValue};
+use crate::{
+    resp::{self, RespValue},
+    shared_store::stream_id::StreamID,
+};
 
 #[derive(Debug, Clone)]
 pub enum ConfigCommand {
@@ -44,6 +47,12 @@ pub enum RespCommand {
         key: String,
         start: Option<String>,
         end: Option<String>,
+    },
+    Xread {
+        count: Option<u64>,
+        block: Option<u64>,
+        keys: Vec<String>,
+        ids: Vec<String>,
     },
 }
 
@@ -108,6 +117,7 @@ impl Command {
                     )),
                     "xadd" => parse_xadd(command),
                     "xrange" => parse_xrange(command),
+                    "xread" => parse_xread(command),
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }
@@ -117,6 +127,35 @@ impl Command {
             )),
         }
     }
+}
+fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
+    let (optional, rest) = {
+        let pos = command
+            .args
+            .iter()
+            .position(|arg| arg.to_lowercase() == "streams")
+            .ok_or_else(|| invalid_data_err("missing STREAMS keyword"))?;
+        (
+            &command.args[0..pos],
+            &command.args[pos + 1..command.args.len()],
+        )
+    };
+    let (keys, stream_ids) = {
+        let length = rest.len() / 2;
+        (
+            &rest[..length],
+            &rest[length..],
+        )
+    };
+    if keys.len() != stream_ids.len() {
+        return invalid_data("Stream Keys must match StreamIds")
+    }
+    Ok(RespCommand::Xread {
+        count: None,
+        block: None,
+        keys: keys.to_vec(),
+        ids: stream_ids.to_vec(),
+    })
 }
 
 fn parse_xadd(command: Command) -> Result<RespCommand, io::Error> {
@@ -141,11 +180,7 @@ fn parse_xrange(command: Command) -> Result<RespCommand, io::Error> {
     let mut range = command.args.iter().skip(1);
     let start = range.next().cloned();
     let end: Option<String> = range.next().cloned();
-    Ok(RespCommand::Xrange {
-        key,
-        start,
-        end,
-    })
+    Ok(RespCommand::Xrange { key, start, end })
 }
 
 fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
