@@ -113,10 +113,15 @@ impl Store {
         map.insert(key.to_string(), entry);
     }
 
-    pub async fn xadd(&self, key: &str, id: String, fields: Vec<(String, String)>) -> io::Result<()> {
+    pub async fn xadd(
+        &self,
+        key: &str,
+        id: String,
+        fields: Vec<(String, String)>,
+    ) -> io::Result<()> {
         let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
             self.keyspace.write().await;
-        
+
         if let Some(entry) = map.get_mut(key) {
             match &mut entry.value {
                 RedisValue::Text(_) => {}
@@ -140,23 +145,23 @@ impl Store {
     fn validate_id(id: &str, previous: &str) -> io::Result<bool> {
         if id == "0-0" {
             return Err(invalid_data_err(
-                "The ID specified in XADD must be greater than 0-0",
+                "ERR The ID specified in XADD must be greater than 0-0",
             ));
         }
         let (milli, incr) = parse_stream_id(id)?;
         let (previous_milli, previous_incr) = parse_stream_id(previous)?;
-        if milli <= previous_milli || incr <= previous_incr {
+        if milli < previous_milli || incr <= previous_incr {
             return Err(invalid_data_err(
-                "The ID specified in XADD must be greater than 0-0",
+                "ERR The ID specified in XADD is equal or smaller than the target stream top item",
             ));
         }
         Ok(true)
     }
 
-    pub async fn del(&self, key: &str) {
-        let mut map = self.keyspace.write().await;
-        map.remove(key);
-    }
+    // pub async fn del(&self, key: &str) {
+    //     let mut map = self.keyspace.write().await;
+    //     map.remove(key);
+    // }
 
     pub async fn append_to_log(&self, bytes: Vec<u8>) {
         let mut log = self.log.write().await;

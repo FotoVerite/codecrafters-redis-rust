@@ -146,9 +146,10 @@ pub async fn handle_master_connection(
             RespCommand::PSYNC(_, _) => unreachable!(),
             RespCommand::Xadd { key, id, fields } => {
                 store.append_to_log(bytes).await;
-                store.xadd(&key, id.clone(), fields).await;
-
-                Some(RespValue::SimpleString(id))
+                match store.xadd(&key, id.clone(), fields).await {
+                    Ok(_) => Some(RespValue::SimpleString(id)),
+                    Err(e) => Some(RespValue::Error(e.to_string())),
+                }
             } // Should be handled above
         };
 
