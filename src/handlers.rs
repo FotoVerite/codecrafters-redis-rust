@@ -147,14 +147,15 @@ pub async fn handle_master_connection(
             RespCommand::Xadd { key, id, fields } => {
                 store.append_to_log(bytes).await;
                 match store.xadd(&key, id.clone(), fields).await {
-                    Ok(generated_id) => Some(RespValue::SimpleString(generated_id)),
+                    Ok(generated_id) => {
+                        Some(RespValue::BulkString(Some(generated_id.into_bytes())))
+                    }
                     Err(e) => Some(RespValue::Error(e.to_string())),
                 }
             } // Should be handled above
         };
 
         println!("Sending: {:?}", &response_value);
-        
 
         if let Some(value) = response_value {
             framed.send(value).await?;
