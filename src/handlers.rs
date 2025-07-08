@@ -108,6 +108,7 @@ pub async fn handle_master_connection(
                 guard.send_to_replicas(copied_command).await?;
                 Some(RespValue::SimpleString("OK".into()))
             }
+            RespCommand::Type(key) => Some(store.get_type(&key).await?),
             RespCommand::ConfigCommand(command) => {
                 Some(handle_config_command(command, rdb.clone()))
             }

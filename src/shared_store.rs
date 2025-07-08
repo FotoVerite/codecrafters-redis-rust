@@ -1,3 +1,4 @@
+use futures::io;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,6 +49,29 @@ impl Store {
         };
 
         RespValue::BulkString(value)
+    }
+
+    pub async fn get_type(&self, key: &str) -> io::Result<RespValue> {
+        match self._get(key).await? {
+            Some(_) => Ok(RespValue::SimpleString("string".into())),
+            None => Ok(RespValue::SimpleString("none".into())),
+        }
+    }
+
+    async fn _get(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        let value = {
+            let map = self.data.read().await;
+            let entry = map.get(key).cloned();
+            if let Some(entry) = entry {
+                match entry.expires_at {
+                    Some(expiry) if Instant::now() >= expiry => None,
+                    _ => Some(entry.value),
+                }
+            } else {
+                None
+            }
+        };
+        Ok(value)
     }
 
     pub async fn keys(&self) -> crate::shared_store::RespValue {

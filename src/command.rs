@@ -25,6 +25,7 @@ pub enum RespCommand {
         value: Vec<u8>,
         px: Option<u64>,
     },
+    Type(String),
     ConfigCommand(ConfigCommand),
     Keys(String),
     Info(String),
@@ -83,12 +84,16 @@ impl Command {
                     "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
                     "get" => Ok(RespCommand::Get(command.args[0].clone())),
                     "set" => parse_set(command),
+                    "type" => Ok(RespCommand::Type(command.args[0].clone())),
                     "config" => parse_config(command),
                     "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
                     "psync" => parse_psync(command),
-                    "wait" => Ok(RespCommand::Wait(command.args[0].clone(), command.args[1].clone())),
+                    "wait" => Ok(RespCommand::Wait(
+                        command.args[0].clone(),
+                        command.args[1].clone(),
+                    )),
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }
