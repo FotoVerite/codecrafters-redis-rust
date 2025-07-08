@@ -16,7 +16,7 @@ use crate::{
     replication_manager::manager::ReplicationManager,
     resp::{self, RespCodec, RespValue},
     server_info::ServerInfo,
-    shared_store::Store,
+    shared_store::shared_store::Store,
 };
 
 pub async fn handle_replication_connection(
@@ -34,7 +34,7 @@ pub async fn handle_replication_connection(
 
                 None
             }
-            RespCommand::Get(key) => Some(store.get(&key).await),
+            RespCommand::Get(key) => Some(store.get(&key).await?),
 
             RespCommand::Info(string) => Some(handle_info_command(string, info.clone())),
             // The master might send PINGs to check the connection
@@ -94,7 +94,7 @@ pub async fn handle_master_connection(
         let response_value = match command {
             RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
             RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
-            RespCommand::Get(key) => Some(store.get(&key).await),
+            RespCommand::Get(key) => Some(store.get(&key).await?),
             RespCommand::Set { key, value, px } => {
                 store.set(&key, value.clone(), px).await;
                 store.append_to_log(bytes).await;
@@ -143,7 +143,13 @@ pub async fn handle_master_connection(
                     elapsed += poll_interval;
                 }
             }
-            RespCommand::PSYNC(_, _) => unreachable!(), // Should be handled above
+            RespCommand::PSYNC(_, _) => unreachable!(),
+            RespCommand::Xadd { key, id, fields } => {
+                store.append_to_log(bytes).await;
+                store.xadd(&key, id.clone(), fields).await;
+
+                Some(RespValue::SimpleString(id))
+            } // Should be handled above
         };
 
         println!("Sending: {:?}", &response_value);

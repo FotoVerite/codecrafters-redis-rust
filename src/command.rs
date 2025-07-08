@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use futures::io;
 
 use crate::resp::{self, RespValue};
@@ -33,6 +35,11 @@ pub enum RespCommand {
     RDB(Option<Vec<u8>>),
     PSYNC(String, i64),
     Wait(String, String),
+    Xadd {
+        key: String,
+        id: String, // Can be "*" or an explicit "1688512345678-0"
+        fields: Vec<(String, String)>,
+    },
 }
 
 impl RespCommand {
@@ -94,6 +101,7 @@ impl Command {
                         command.args[0].clone(),
                         command.args[1].clone(),
                     )),
+                    "xadd" => parse_xadd(command),
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }
@@ -103,6 +111,23 @@ impl Command {
             )),
         }
     }
+}
+
+fn parse_xadd(command: Command) -> Result<RespCommand, io::Error> {
+    let key = command.args[0].clone();
+    let id = command.args[1].clone();
+    let mut pairs = command.args.iter().skip(2);
+    let rest = &command.args[2..];
+
+    if rest.len() % 2 != 0 {
+        return invalid_data("Each field must have a key value pair");
+    }
+    let fields = rest
+        .chunks(2)
+        .map(|chunk| (chunk[0].clone(), chunk[1].clone()))
+        .collect();
+
+    Ok(RespCommand::Xadd { key, id, fields })
 }
 
 fn parse_set(command: Command) -> Result<RespCommand, io::Error> {

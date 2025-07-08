@@ -10,13 +10,12 @@ mod shared_store;
 
 use std::sync::Arc;
 
-use futures::StreamExt;
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::codec::Framed;
 
 use crate::{
     error_helpers::invalid_data_err, rdb::config::RdbConfig,
-    replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::Store,
+    replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::shared_store::Store,
 };
 
 #[tokio::main]

@@ -6,15 +6,23 @@ use tokio::sync::RwLock;
 use tokio::time::Instant;
 
 use crate::resp::RespValue;
+use crate::shared_store::redis_stream::{Stream, StreamEntry};
+
+#[derive(Debug, Clone)]
+pub enum RedisValue {
+    Text(Vec<u8>),
+    Stream(Stream),
+    // Add ZSet, List, etc. as needed
+}
 
 #[derive(Debug, Clone)]
 pub struct Entry {
-    value: Vec<u8>,
+    value: RedisValue,
     expires_at: Option<Instant>,
 }
 
 impl Entry {
-    pub fn new(value: Vec<u8>, expires_at: Option<Instant>) -> Self {
+    pub fn new(value: RedisValue, expires_at: Option<Instant>) -> Self {
         Self { value, expires_at }
     }
 }
@@ -22,45 +30,46 @@ type SharedStore = Arc<RwLock<HashMap<String, Entry>>>;
 type Log = Arc<RwLock<Vec<u8>>>;
 #[derive(Debug, Clone)]
 pub struct Store {
-    data: SharedStore,
+    keyspace: SharedStore,
     log: Log,
 }
 
 impl Store {
     pub fn new() -> Self {
         Self {
-            data: Arc::new(RwLock::new(HashMap::new())),
+            keyspace: Arc::new(RwLock::new(HashMap::new())),
             log: Arc::new(RwLock::new(vec![])),
         }
     }
 
-    pub async fn get(&self, key: &str) -> crate::shared_store::RespValue {
+    pub async fn get(&self, key: &str) -> io::Result<RespValue> {
         let value = {
-            let map = self.data.read().await;
-            let entry = map.get(key).cloned();
-            if let Some(entry) = entry {
-                match entry.expires_at {
-                    Some(expiry) if Instant::now() >= expiry => None,
-                    _ => Some(entry.value),
+            if let Some(resp_value) = self._get(key).await? {
+                match resp_value {
+                    RedisValue::Text(value) => Some(value),
+                    _ => Some("".to_string().as_bytes().to_vec()),
                 }
             } else {
                 None
             }
         };
 
-        RespValue::BulkString(value)
+        Ok(RespValue::BulkString(value))
     }
 
     pub async fn get_type(&self, key: &str) -> io::Result<RespValue> {
         match self._get(key).await? {
-            Some(_) => Ok(RespValue::SimpleString("string".into())),
+            Some(redis_value) => match redis_value {
+                RedisValue::Stream(_) => Ok(RespValue::SimpleString("stream".into())),
+                RedisValue::Text(_) => Ok(RespValue::SimpleString("string".into())),
+            },
             None => Ok(RespValue::SimpleString("none".into())),
         }
     }
 
-    async fn _get(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
+    async fn _get(&self, key: &str) -> io::Result<Option<RedisValue>> {
         let value = {
-            let map = self.data.read().await;
+            let map = self.keyspace.read().await;
             let entry = map.get(key).cloned();
             if let Some(entry) = entry {
                 match entry.expires_at {
@@ -74,9 +83,9 @@ impl Store {
         Ok(value)
     }
 
-    pub async fn keys(&self) -> crate::shared_store::RespValue {
+    pub async fn keys(&self) -> RespValue {
         let mut values = vec![];
-        let map = self.data.read().await;
+        let map = self.keyspace.read().await;
         for key in map.keys() {
             let entry = map.get(key).cloned();
             if let Some(entry) = entry {
@@ -96,15 +105,33 @@ impl Store {
 
     pub async fn set(&self, key: &str, value: Vec<u8>, px: Option<u64>) {
         let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
-            self.data.write().await;
+            self.keyspace.write().await;
         let expires_at = px.map(|ms| Instant::now() + Duration::from_millis(ms));
 
-        let entry = Entry::new(value, expires_at);
+        let entry = Entry::new(RedisValue::Text(value), expires_at);
         map.insert(key.to_string(), entry);
     }
 
+    pub async fn xadd(&self, key: &str, id: String, fields: Vec<(String, String)>) {
+        let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
+            self.keyspace.write().await;
+        if let Some(entry) = map.get_mut(key) {
+            match &mut entry.value {
+                RedisValue::Text(_) => {}
+                RedisValue::Stream(stream) => {
+                    stream.append(id, fields);
+                }
+            }
+        } else {
+            let mut stream = Stream::new();
+            stream.append(id, fields);
+            let entry = Entry::new(RedisValue::Stream(stream), None);
+            map.insert(key.to_string(), entry);
+        }
+    }
+
     pub async fn del(&self, key: &str) {
-        let mut map = self.data.write().await;
+        let mut map = self.keyspace.write().await;
         map.remove(key);
     }
 

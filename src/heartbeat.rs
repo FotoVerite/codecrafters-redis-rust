@@ -10,7 +10,7 @@ use tokio_util::codec::Framed;
 
 use crate::{
     resp::{RespCodec, RespValue},
-    shared_store::Store,
+    shared_store::shared_store::Store,
 };
 
 pub async fn send_heartbeat(
