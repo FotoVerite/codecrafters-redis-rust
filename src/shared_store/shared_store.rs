@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
+use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
 use crate::shared_store::redis_stream::{Stream, StreamEntry};
 
@@ -112,22 +113,44 @@ impl Store {
         map.insert(key.to_string(), entry);
     }
 
-    pub async fn xadd(&self, key: &str, id: String, fields: Vec<(String, String)>) {
+    pub async fn xadd(&self, key: &str, id: String, fields: Vec<(String, String)>) -> io::Result<()> {
         let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
             self.keyspace.write().await;
+        
         if let Some(entry) = map.get_mut(key) {
             match &mut entry.value {
                 RedisValue::Text(_) => {}
                 RedisValue::Stream(stream) => {
+                    Self::validate_id(&id, stream.previous_id())?;
+
                     stream.append(id, fields);
                 }
             }
+            Ok(())
         } else {
+            Self::validate_id(&id, "0-0")?;
             let mut stream = Stream::new();
             stream.append(id, fields);
             let entry = Entry::new(RedisValue::Stream(stream), None);
             map.insert(key.to_string(), entry);
+            Ok(())
         }
+    }
+
+    fn validate_id(id: &str, previous: &str) -> io::Result<bool> {
+        if id == "0-0" {
+            return Err(invalid_data_err(
+                "The ID specified in XADD must be greater than 0-0",
+            ));
+        }
+        let (milli, incr) = parse_stream_id(id)?;
+        let (previous_milli, previous_incr) = parse_stream_id(previous)?;
+        if milli <= previous_milli || incr <= previous_incr {
+            return Err(invalid_data_err(
+                "The ID specified in XADD must be greater than 0-0",
+            ));
+        }
+        Ok(true)
     }
 
     pub async fn del(&self, key: &str) {
@@ -144,4 +167,21 @@ impl Store {
         let log = self.log.read().await;
         log.len()
     }
+}
+
+fn parse_stream_id(id: &str) -> io::Result<(u64, u64)> {
+    let mut parts = id.splitn(2, '-');
+    let ms = parts
+        .next()
+        .ok_or_else(|| invalid_data_err("Invalid ID format"))?
+        .parse::<u64>()
+        .map_err(|_| invalid_data_err("Invalid milliseconds in stream ID"))?;
+
+    let seq = parts
+        .next()
+        .ok_or_else(|| invalid_data_err("Invalid ID format"))?
+        .parse::<u64>()
+        .map_err(|_| invalid_data_err("Invalid sequence in stream ID"))?;
+
+    Ok((ms, seq))
 }
