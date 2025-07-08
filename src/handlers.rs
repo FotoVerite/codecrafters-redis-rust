@@ -1,15 +1,17 @@
-use std::{io, sync::Arc};
+use std::{io, sync::Arc, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
+    net::{tcp::OwnedWriteHalf, TcpStream},
     sync::Mutex,
+    time::sleep,
 };
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, FramedRead};
 
 use crate::{
     command::{self, ConfigCommand, ReplconfCommand, RespCommand},
+    error_helpers::{invalid_data, invalid_data_err},
     rdb::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
     resp::{self, RespCodec, RespValue},
@@ -71,7 +73,7 @@ pub async fn handle_master_connection(
     let mut framed = Framed::new(socket, resp::RespCodec);
     let mut peer_addr = None;
     while let Some(result) = framed.next().await {
-        let (resp_value, _) = result?;
+        let (resp_value, bytes) = result?;
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
         if let RespCommand::PSYNC(string, pos) = command.clone() {
@@ -95,6 +97,8 @@ pub async fn handle_master_connection(
             RespCommand::Get(key) => Some(store.get(&key).await),
             RespCommand::Set { key, value, px } => {
                 store.set(&key, value.clone(), px).await;
+                store.append_to_log(bytes).await;
+
                 let copied_command = RespCommand::Set {
                     key,
                     value: value.clone(),
@@ -115,11 +119,29 @@ pub async fn handle_master_connection(
                 &mut peer_addr,
             )),
             RespCommand::RDB(_) => None,
-            RespCommand::Wait(_, _) => {
-                let mut guard = manager.lock().await;
-                let len = guard.replica_count().await?;
-                Some(RespValue::Integer(len as i64))
-            },
+            RespCommand::Wait(required_replicas, timeout_ms) => {
+                let offset = store.get_offset().await;
+                let mut elapsed = 0;
+                let poll_interval = 250;
+                let ack_command = RespCommand::ReplconfCommand(ReplconfCommand::Getack("*".into()));
+
+                {
+                    let guard = manager.lock().await;
+                    guard.send_to_replicas(ack_command.clone()).await?;
+                }
+                loop {
+                    let acked = {
+                        let manager = manager.lock().await;
+                        manager.replica_count(offset as u64).await?
+                    };
+                    if acked >= required_replicas.parse()? || elapsed >= timeout_ms.parse()? {
+                        break Some(RespValue::Integer(acked as i64));
+                    }
+
+                    tokio::time::sleep(Duration::from_millis(poll_interval)).await;
+                    elapsed += poll_interval;
+                }
+            }
             RespCommand::PSYNC(_, _) => unreachable!(), // Should be handled above
         };
 
@@ -142,7 +164,7 @@ async fn handle_psync_command(
     peer_addr: String,
 ) -> io::Result<()> {
     let mut stream = framed.into_inner();
-
+    let mut peer_address = stream.peer_addr()?;
     let first_response = format!("+FULLRESYNC {} 0\r\n", info.master_replid);
 
     stream.write_all(first_response.as_bytes()).await?;
@@ -154,12 +176,31 @@ async fn handle_psync_command(
     stream.write_all(rdb_bytes.as_slice()).await?;
 
     stream.flush().await?;
+    let (read_half, mut write_half) = stream.into_split();
     manager
         .lock()
         .await
-        .add_replica(peer_addr, stream.peer_addr()?, stream)
+        .add_replica(&peer_addr, peer_address, write_half)
         .await?;
+    let mut framed_reader = FramedRead::new(read_half, RespCodec);
+    while let Some(result) = framed_reader.next().await {
+        let (resp_value, _) = result?;
+        let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
+        match command {
+            RespCommand::Ping => {}
+            RespCommand::ReplconfCommand(ReplconfCommand::Ack(offset)) => {
+                let offset = offset.parse::<u64>().map_err(|_| invalid_data_err("msg"))?;
+                manager
+                    .lock()
+                    .await
+                    .update_offset(&peer_addr, offset)
+                    .await?;
+            }
+
+            _ => {}
+        };
+    }
     Ok(())
 }
 fn handle_replconf_command(
@@ -169,6 +210,7 @@ fn handle_replconf_command(
 ) -> RespValue {
     match command {
         ReplconfCommand::ListeningPort(addr) => *peer_addr = Some(addr),
+        ReplconfCommand::Ack(string) => {}
         _ => {}
     }
     RespValue::SimpleString("OK".into())

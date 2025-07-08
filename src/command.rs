@@ -12,6 +12,7 @@ pub enum ReplconfCommand {
     ListeningPort(String),
     Capa(String),
     Getack(String),
+    Ack(String),
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +153,15 @@ fn parse_replconf(command: Command) -> io::Result<RespCommand> {
                 .get(1)
                 .ok_or_else(|| invalid_data_err("Missing arg field"))?;
             Ok(RespCommand::ReplconfCommand(ReplconfCommand::Getack(
+                arg.clone(),
+            )))
+        }
+        "ack" => {
+            let arg = command
+                .args
+                .get(1)
+                .ok_or_else(|| invalid_data_err("Missing arg field"))?;
+            Ok(RespCommand::ReplconfCommand(ReplconfCommand::Ack(
                 arg.clone(),
             )))
         }

@@ -1,6 +1,7 @@
 mod command;
 mod error_helpers;
 mod handlers;
+mod heartbeat;
 mod rdb;
 mod replication_manager;
 mod resp;
@@ -9,12 +10,13 @@ mod shared_store;
 
 use std::sync::Arc;
 
+use futures::StreamExt;
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::codec::Framed;
 
 use crate::{
-    rdb::config::RdbConfig, replication_manager::manager::ReplicationManager,
-    server_info::ServerInfo, shared_store::Store,
+    error_helpers::invalid_data_err, rdb::config::RdbConfig,
+    replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::Store,
 };
 
 #[tokio::main]
@@ -77,15 +79,15 @@ async fn main() -> std::io::Result<()> {
                 match info_clone_for_handshake.handshake().await {
                     Ok(Some((mut socket, other))) => {
                         println!("Handshake successful, connected to master.");
-                        if let Err(e) = handlers::handle_replication_connection(
-                            &mut socket,
-                            store_clone_for_handshake,
-                            info_clone_for_handshake,
-                        )
-                        .await
-                        {
-                            eprintln!("Error in connection with master: {:?}", e);
-                        }
+                        let store_for_heartbeat: Arc<Store> = store_clone_for_handshake.clone();
+
+                        let framed = Arc::new(Mutex::new(socket));
+                        let heartbeat_framed = framed.clone();
+                        setup_heartbeat(heartbeat_framed, store_for_heartbeat);
+                        let listener_framed = framed.clone();
+                        let listener_store = store_clone_for_handshake.clone();
+                        let listener_info = info_clone_for_handshake.clone();
+                        setup_master_listener(listener_framed, listener_store, listener_info)
                     }
                     Ok(None) => {
                         eprintln!("Handshake returned Ok(None) - no socket available.");
@@ -124,5 +126,22 @@ async fn main() -> std::io::Result<()> {
             std::process::exit(1);
         }
     }
-    Ok(())
+}
+
+type ArcFrame = Arc<Mutex<Framed<tokio::net::TcpStream, resp::RespCodec>>>;
+
+fn setup_heartbeat(framed: ArcFrame, store: Arc<Store>) {
+    tokio::spawn(async move {
+        _ = heartbeat::send_heartbeat(framed, store).await;
+    });
+}
+
+fn setup_master_listener(framed: ArcFrame, store: Arc<Store>, info: Arc<ServerInfo>) {
+    tokio::spawn(async move {
+        let mut guard = framed.lock().await;
+
+        handlers::handle_replication_connection(&mut guard, store, info)
+            .await
+            .map_err(|e| invalid_data_err(format!("Replication Listener had error, {}", e)))
+    });
 }

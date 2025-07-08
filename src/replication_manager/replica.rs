@@ -1,13 +1,14 @@
 use futures::{io, SinkExt};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 use tokio::{
-    net::TcpStream,
+    net::{tcp::OwnedWriteHalf, TcpStream},
     sync::mpsc::{self, Receiver, Sender},
+    time::interval,
 };
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, FramedWrite};
 
 use crate::{
-    command::RespCommand,
+    command::{ReplconfCommand, RespCommand},
     error_helpers::invalid_data_err,
     resp::{RespCodec, RespValue},
 };
@@ -21,20 +22,28 @@ pub struct Replica {
 }
 
 impl Replica {
-    pub fn new(address: SocketAddr, stream: TcpStream) -> Self {
+    pub fn new(address: SocketAddr, stream: OwnedWriteHalf) -> Self {
         let (tx, mut rx) = mpsc::channel::<RespCommand>(32);
 
         tokio::spawn(async move {
-            let mut framed: Framed<TcpStream, RespCodec> = Framed::new(stream, RespCodec);
+            let mut framed  = FramedWrite::new(stream, RespCodec);
 
             while let Some(command) = rx.recv().await {
-                dbg!("hello");
                 match command {
                     RespCommand::Set { key, value, px } => {
                         let values = vec![
                             RespValue::BulkString(Some(b"SET".to_vec())),
                             RespValue::BulkString(Some(key.into())),
                             RespValue::BulkString(Some(value)),
+                        ];
+                        let request = RespValue::Array(values);
+                        let _ = framed.send(request).await;
+                    }
+                    RespCommand::ReplconfCommand(ReplconfCommand::Getack(_)) => {
+                        let values = vec![
+                            RespValue::BulkString(Some(b"REPLCONF".to_vec())),
+                            RespValue::BulkString(Some(b"GETACK".to_vec())),
+                            RespValue::BulkString(Some(b"*".to_vec())),
                         ];
                         let request = RespValue::Array(values);
                         let _ = framed.send(request).await;
@@ -52,7 +61,6 @@ impl Replica {
     }
 
     pub async fn send(&self, command: RespCommand) -> io::Result<()> {
-        dbg!(&self.address);
         self.tx.send(command).await.map_err(|e| {
             invalid_data_err(format!(
                 "Failed to send command to replica {}: {}",
