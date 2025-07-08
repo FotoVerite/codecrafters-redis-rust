@@ -125,11 +125,23 @@ impl Store {
             Some(entry) => match &entry.value {
                 RedisValue::Stream(stream) => {
                     let start: Option<StreamID> = match start {
-                        Some(s) => Some(s.as_str().try_into()?),
+                        Some(s) => {
+                            if s == "-" {
+                                None
+                            } else {
+                                Some(s.as_str().try_into()?)
+                            }
+                        }
                         None => None,
                     };
                     let end: Option<StreamID> = match end {
-                        Some(s) => Some(s.as_str().try_into()?),
+                        Some(s) => {
+                            if s == "+" {
+                                None
+                            } else {
+                                Some(s.as_str().try_into()?)
+                            }
+                        },
                         None => None,
                     };
 
