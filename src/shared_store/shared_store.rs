@@ -1,7 +1,7 @@
 use futures::io;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 
@@ -168,7 +168,23 @@ impl Store {
             return Ok(id.clone());
         }
         match id.as_str() {
-            "*" => Ok("0-1".into()),
+            "*" => {
+                let ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Time went backwards")
+                    .as_millis() as u64;
+                let seq = if let Some(previous) = previous {
+                    let (prev_ms, prev_seq) = parse_stream_id(previous)?;
+                    if prev_ms == ms {
+                        prev_seq + 1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                Ok(format!("{}-{}", ms, seq))
+            }
             _ => {
                 let mut parts = id.splitn(2, '-');
                 let ms = parts
