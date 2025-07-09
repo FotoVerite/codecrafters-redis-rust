@@ -1,11 +1,16 @@
-use std::{ sync::Arc};
 use futures::{SinkExt, StreamExt};
+use std::sync::Arc;
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_util::codec::Framed;
 
 use crate::{
     command::{self, RespCommand},
-    handlers::{command_handlers::{config, psync, set, stream, type_command, wait, xadd, xrange}, keys, replication::handle_replconf_command},
+    handlers::{
+        command_handlers::{config, psync, set, stream, type_command, wait, xadd, xrange},
+        keys,
+        replication::handle_replconf_command,
+        session::Session,
+    },
     rdb::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
     resp::{RespCodec, RespValue},
@@ -20,6 +25,7 @@ pub async fn handle_master_connection(
     manager: Arc<Mutex<ReplicationManager>>,
     info: Arc<ServerInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut session = Session::new();
     let mut framed = Framed::new(socket, RespCodec);
     let mut peer_addr = None;
     while let Some(result) = framed.next().await {
@@ -40,13 +46,33 @@ pub async fn handle_master_connection(
                 break; // End the loop for this connection
             }
         }
+        if session.in_multi {
+            match command {
+                RespCommand::Exec => {
+                    if session.queued.is_empty() {
+                     framed.send(RespValue::Array(vec![])).await?; 
+                    }
+                    session.in_multi = false;
+                }
+                _ => {
+                    session.queued.push(command);
+                    framed
+                        .send(RespValue::BulkString(Some("QUEUED".into())))
+                        .await?;
+                }
+            }
+            return Ok(());
+        }
 
         let response_value = match command {
             RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
             RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
-            RespCommand::Incr(key) => {
-                store.incr(&key).await?
+            RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
+            RespCommand::Multi => {
+                session.in_multi = true;
+                Some(RespValue::SimpleString("OK".into()))
             }
+            RespCommand::Incr(key) => store.incr(&key).await?,
             RespCommand::Get(key) => Some(store.get(&key).await?),
             RespCommand::Set { key, value, px } => {
                 set::set_command(&store, &manager, key, &value, px, bytes).await?
@@ -55,7 +81,9 @@ pub async fn handle_master_connection(
             RespCommand::ConfigCommand(command) => {
                 Some(config::config_command(command, rdb.clone()))
             }
-            RespCommand::Keys(string) => Some(super::keys::keys_command(string, store.clone()).await),
+            RespCommand::Keys(string) => {
+                Some(super::keys::keys_command(string, store.clone()).await)
+            }
             RespCommand::Info(string) => Some(super::info::info_command(string, info.clone())),
             RespCommand::ReplconfCommand(command) => Some(handle_replconf_command(
                 command,
@@ -66,7 +94,7 @@ pub async fn handle_master_connection(
             RespCommand::Wait(required_replicas, timeout_ms) => {
                 wait::wait_command(&store, &manager, required_replicas, timeout_ms).await?
             }
-            
+
             RespCommand::Xadd { key, id, fields } => {
                 xadd::xadd_command(&store, key, id, fields, bytes).await?
             } // Should be handled above
@@ -79,7 +107,9 @@ pub async fn handle_master_connection(
                 keys,
                 ids,
             } => stream::xread_command(&store, &block, &keys, &ids).await?,
-            _ => {unimplemented!("{:?}", format!("{}", command))}
+            _ => {
+                unimplemented!("{:?}", format!("{}", command))
+            }
         };
 
         println!("Sending: {:?}", &response_value);
