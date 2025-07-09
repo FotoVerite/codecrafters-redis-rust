@@ -11,7 +11,7 @@ use crate::{
     command::{self, ReplconfCommand, RespCommand},
     error_helpers::invalid_data_err,
     replication_manager::manager::ReplicationManager,
-    resp::{RespCodec, RespValue},
+    resp::{RespCodec},
     server_info::ServerInfo,
 };
 

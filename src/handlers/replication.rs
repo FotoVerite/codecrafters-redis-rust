@@ -1,12 +1,10 @@
-use std::{io, sync::Arc};
+use std::{sync::Arc};
 use futures::{SinkExt, StreamExt};
 use tokio::{net::TcpStream};
 use tokio_util::codec::Framed;
 
 use crate::{
     command::{self, ReplconfCommand, RespCommand},
-    error_helpers::invalid_data_err,
-    handlers::info,
     resp::{RespCodec, RespValue},
     server_info::ServerInfo,
     shared_store::shared_store::Store,
@@ -63,7 +61,7 @@ pub fn handle_replconf_command(
 ) -> RespValue {
     match command {
         ReplconfCommand::ListeningPort(addr) => *peer_addr = Some(addr),
-        ReplconfCommand::Ack(string) => {}
+        ReplconfCommand::Ack(_) => {}
         _ => {}
     }
     RespValue::SimpleString("OK".into())

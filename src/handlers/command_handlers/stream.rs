@@ -33,7 +33,6 @@ pub fn encode_stream(resp: Vec<(StreamID, StreamEntry)>) -> Vec<RespValue> {
                 };
                 outer.push(RespValue::Array(vec![bulkstring_id, field_array]));
             }
-            _ => {}
         }
     }
     outer

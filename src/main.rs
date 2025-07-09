@@ -71,7 +71,7 @@ async fn main() -> std::io::Result<()> {
             let store_clone_for_handshake = store.clone();
             tokio::spawn(async move {
                 match info_clone_for_handshake.handshake().await {
-                    Ok(Some((socket, other))) => {
+                    Ok(Some((socket, _))) => {
                         println!("Handshake successful, connected to master.");
                         let store_for_heartbeat: Arc<Store> = store_clone_for_handshake.clone();
 

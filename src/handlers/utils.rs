@@ -1,6 +1,6 @@
 use tokio::{io::{AsyncBufReadExt, BufReader}, net::TcpStream};
 
-pub async fn debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStream> {
+pub async fn _debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStream> {
     let mut reader = BufReader::new(stream);
 
     // Peek into the handshake response

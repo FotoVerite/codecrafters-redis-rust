@@ -148,7 +148,7 @@ impl RdbConfig {
     }
 }
 
-fn peek_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) -> std::io::Result<()> {
+fn _peek_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) -> std::io::Result<()> {
     let buf = reader.fill_buf()?; // Get a slice to the currently buffered bytes
 
     let to_show = &buf[..std::cmp::min(n, buf.len())];
@@ -159,7 +159,7 @@ fn peek_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) -> std::io::Result<(
     Ok(())
 }
 
-fn consume_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) {
+fn _consume_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) {
     // After you're sure you want to move the cursor forward:
     reader.consume(n);
 }

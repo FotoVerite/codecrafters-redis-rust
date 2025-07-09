@@ -14,6 +14,7 @@ use crate::shared_store::stream_id::StreamID;
 pub enum RedisValue {
     Text(Vec<u8>),
     Stream(Stream),
+    #[allow(dead_code)]
     Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
 
@@ -155,7 +156,7 @@ impl Store {
                     number += 1;
                     let new_value = (number).to_string().into_bytes();
                     previous.value = RedisValue::Text(new_value);
-                    Ok(Some(RespValue::Integer(number )))
+                    Ok(Some(RespValue::Integer(number)))
                 }
 
                 _ => error,

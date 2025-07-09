@@ -1,7 +1,6 @@
-use std::io::{self, BufRead};
+use std::io::{self};
 
 use futures::{SinkExt, StreamExt};
-use std::io::Read;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
@@ -204,7 +203,7 @@ fn parse_repl_instance(
     Ok(())
 }
 
-pub async fn debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStream> {
+pub async fn _debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStream> {
     let mut reader = BufReader::new(stream);
 
     // Peek into the handshake response
@@ -222,7 +221,7 @@ pub async fn debug_peek_handshake(stream: TcpStream) -> std::io::Result<TcpStrea
     Ok(stream)
 }
 
-async fn read_rdb_from_master(
+async fn _read_rdb_from_master(
     stream: &mut TcpStream,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = BufReader::new(stream);

@@ -14,12 +14,10 @@ pub type StreamEntries = Vec<(StreamID, StreamEntry)>;
 #[derive(Debug, Clone)]
 pub enum StreamEntry {
     Data { id: StreamID, fields: Fields },
-    Tombstone { id: String },
-    Control { kind: ControlType },
 }
 
 #[derive(Debug, Clone)]
-pub enum ControlType {
+pub enum _ControlType {
     GroupCreate { group_name: String },
     Ack { consumer: String, ids: Vec<String> },
 }
@@ -40,10 +38,6 @@ impl Stream {
         self.entries.insert(id, entry);
         self.notify.notify_waiters();
         Ok(())
-    }
-
-    pub fn has_key(&self, id: StreamID) -> bool {
-        self.entries.contains_key(&id)
     }
 
     pub fn previous_id(&self) -> &StreamID {

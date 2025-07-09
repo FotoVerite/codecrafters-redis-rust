@@ -17,7 +17,6 @@ pub struct Replica {
     pub address: SocketAddr,
     pub tx: Sender<RespCommand>,
     pub acknowledged_offset: u64,
-    pub is_online: bool,
 }
 
 impl Replica {
@@ -29,7 +28,8 @@ impl Replica {
 
             while let Some(command) = rx.recv().await {
                 match command {
-                    RespCommand::Set { key, value, px } => {
+                    
+                    RespCommand::Set { key, value, px: _ } => {
                         let values = vec![
                             RespValue::BulkString(Some(b"SET".to_vec())),
                             RespValue::BulkString(Some(key.into())),
@@ -55,7 +55,6 @@ impl Replica {
             address,
             tx,
             acknowledged_offset: 0,
-            is_online: true,
         }
     }
 

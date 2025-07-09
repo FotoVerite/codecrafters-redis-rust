@@ -5,11 +5,12 @@ use crate::resp::RespValue;
 #[derive(Debug, Clone)]
 pub enum ConfigCommand {
     Get(String),
-    Set(String, String),
+    _Set(String, String),
 }
 #[derive(Debug, Clone)]
 pub enum ReplconfCommand {
     ListeningPort(String),
+    #[allow(dead_code)]
     Capa(String),
     Getack(String),
     Ack(String),
@@ -28,6 +29,7 @@ pub enum RespCommand {
     Discard,
     Ping,
     PSYNC(String, i64),
+    #[allow(dead_code)]
     RDB(Option<Vec<u8>>),
     ReplconfCommand(ReplconfCommand),
     Set {
@@ -47,6 +49,7 @@ pub enum RespCommand {
         start: Option<String>,
         end: Option<String>,
     },
+    #[allow(dead_code)]
     Xread {
         count: Option<u64>,
         block: Option<u64>,
@@ -62,7 +65,7 @@ impl std::fmt::Display for RespCommand {
 }
 
 impl RespCommand {
-    pub fn to_resp(self) -> RespValue {
+    pub fn _to_resp(self) -> RespValue {
         match self {
             RespCommand::Ping => RespValue::SimpleString("PONG".into()),
             RespCommand::Echo(s) => RespValue::BulkString(Some(s.into_bytes())),
@@ -302,7 +305,7 @@ fn parse_psync(command: Command) -> Result<RespCommand, io::Error> {
     } else {
         let pos = command.args[1]
             .parse::<i64>()
-            .map_err(|_| invalid_data_err("Parsing Erorr with psync command"))?;
+            .map_err(|_| invalid_data_err("Parsing Error with psync command"))?;
         Ok(RespCommand::PSYNC(command.args[0].clone(), pos))
     }
 }

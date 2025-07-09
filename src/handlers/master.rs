@@ -7,7 +7,6 @@ use crate::{
     command::{self, RespCommand},
     handlers::{
         command_handlers::{config, psync, set, stream, type_command, wait, xadd, xrange},
-        keys,
         replication::handle_replconf_command,
         session::Session,
     },
@@ -18,7 +17,7 @@ use crate::{
     shared_store::shared_store::Store,
 };
 
-pub struct CommandContext {
+pub struct _CommandContext {
     pub store: Arc<Store>,
     pub rdb: Arc<RdbConfig>,
     pub manager: Arc<Mutex<ReplicationManager>>,
@@ -54,7 +53,6 @@ pub async fn handle_master_connection(
                 break; // End the loop for this connection
             }
         }
-        dbg!(session.in_multi);
         if session.in_multi {
             match command {
                 RespCommand::Exec => {
@@ -67,7 +65,6 @@ pub async fn handle_master_connection(
                     let queue = &session.queued.clone();
                     for (queued_command, bytes) in queue {
                         let response = process_command(
-                            &mut framed,
                             store.clone(),
                             rdb.clone(),
                             manager.clone(),
@@ -104,7 +101,6 @@ pub async fn handle_master_connection(
             continue;
         }
         let response_value = process_command(
-            &mut framed,
             store.clone(),
             rdb.clone(),
             manager.clone(),
@@ -127,7 +123,6 @@ pub async fn handle_master_connection(
 }
 
 async fn process_command(
-    framed: &mut Framed<TcpStream, RespCodec>,
     store: Arc<Store>,
     rdb: Arc<RdbConfig>,
     manager: Arc<Mutex<ReplicationManager>>,
@@ -171,7 +166,7 @@ async fn process_command(
             xrange::xrange_command(&store, key, start, end).await?
         }
         RespCommand::Xread {
-            count,
+            count: _,
             block,
             keys,
             ids,

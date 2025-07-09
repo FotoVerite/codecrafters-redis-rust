@@ -185,7 +185,7 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
             RespValue::BulkString(c) => write_bulk_string(dst, c),
             RespValue::Array(values) => self.write_array(dst, values),
-            RespValue::RDB(binary) => Ok(()),
+            RespValue::RDB(_) => Ok(()),
         }
     }
 }
