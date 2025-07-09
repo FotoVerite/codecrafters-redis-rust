@@ -89,6 +89,8 @@ pub async fn handle_master_connection(
                     session.queued.clear();
                 }
                 RespCommand::Discard => {
+                    framed.send(RespValue::SimpleString("OK".into())).await?;
+
                     session.queued.clear();
                     session.in_multi = false;
                 }
