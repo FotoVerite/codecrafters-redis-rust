@@ -1,5 +1,5 @@
 use bytes::{BufMut, BytesMut};
-use std::{fmt::Write, io};
+use std::io;
 use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Debug)]

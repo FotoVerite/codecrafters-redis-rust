@@ -7,7 +7,7 @@ use tokio::time::Instant;
 
 use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
-use crate::shared_store::redis_stream::{Stream, StreamEntries, StreamEntry};
+use crate::shared_store::redis_stream::{Stream, StreamEntries};
 use crate::shared_store::stream_id::StreamID;
 
 #[derive(Debug, Clone)]
@@ -85,6 +85,35 @@ impl Store {
         Ok(value)
     }
 
+    pub async fn resolve_stream_ids(
+        &self,
+        keys: &Vec<String>,
+        ids: &Vec<String>,
+    ) -> io::Result<Vec<StreamID>> {
+        if keys.len() != ids.len() {
+            return Err(invalid_data_err("Mismatched keys and IDs"));
+        }
+        let map = self.keyspace.read().await;
+        let mut ret = Vec::with_capacity(keys.len());
+        for (key, id) in keys.iter().zip(ids) {
+            match id.as_str() {
+                "$" => {
+                    let entry = map
+                        .get(key)
+                        .ok_or_else(|| invalid_data_err(format!("Missing key: {}", key)))?;
+
+                    match &entry.value {
+                        RedisValue::Stream(stream) => ret.push(stream.previous_id().clone()),
+                        _ => return invalid_data("Key is not for a stream"),
+                    }
+                }
+                _ => ret.push(id.as_str().try_into()?),
+            }
+        }
+
+        Ok(ret)
+    }
+
     pub async fn keys(&self) -> RespValue {
         let mut values = vec![];
         let map = self.keyspace.read().await;
@@ -156,12 +185,12 @@ impl Store {
         }
     }
 
-    pub async fn xread(&self, key: &String, start: &String) -> io::Result<StreamEntries> {
+    pub async fn xread(&self, key: &String, start: &StreamID) -> io::Result<StreamEntries> {
         let map = self.keyspace.read().await;
         match map.get(key) {
             Some(entry) => match &entry.value {
                 RedisValue::Stream(stream) => {
-                    let range = stream.get_from(start.as_str().try_into()?);
+                    let range = stream.get_from(*start);
                     Ok(range)
                 }
                 _ => Err(invalid_data_err(

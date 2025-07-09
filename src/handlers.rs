@@ -1,17 +1,17 @@
 use std::{io, sync::Arc, time::Duration};
 
-use futures::{future::select_all, stream::iter, SinkExt, StreamExt};
+use futures::{future::select_all, SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{tcp::OwnedWriteHalf, TcpStream},
-    sync::Mutex,
-    time::sleep,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+    sync::{Mutex, Notify},
+    task,
 };
 use tokio_util::codec::{Framed, FramedRead};
 
 use crate::{
     command::{self, ConfigCommand, ReplconfCommand, RespCommand},
-    error_helpers::{invalid_data, invalid_data_err},
+    error_helpers::invalid_data_err,
     rdb::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
     resp::{self, RespCodec, RespValue},
@@ -163,31 +163,7 @@ pub async fn handle_master_connection(
                 block,
                 keys,
                 ids,
-            } => {
-                let result = poll_xread(&store, &keys, &ids).await?;
-                if !result.is_empty() {
-                    Some(RespValue::Array(result))
-                } else {
-                    let notifiers = store.get_notifiers(&keys).await?;
-                    let futures = notifiers
-                        .iter()
-                        .map(|n| Box::pin(n.notified()))
-                        .collect::<Vec<_>>();
-                    let timeout = Duration::from_millis(block.unwrap_or(0));
-
-                    let selected = tokio::select! {
-
-                                     _ = select_all(futures) => {
-                                         let result = poll_xread(&store, &keys, &ids).await?;
-                    Some(RespValue::Array(result))
-                                     }
-                                    _ = tokio::time::sleep(timeout) => {
-                                        Some(RespValue::BulkString(None))
-                                    }
-                                };
-                    selected
-                }
-            }
+            } => xread_command(&store, &block, &keys, &ids).await?,
         };
 
         println!("Sending: {:?}", &response_value);
@@ -209,7 +185,7 @@ async fn handle_psync_command(
     peer_addr: String,
 ) -> io::Result<()> {
     let mut stream = framed.into_inner();
-    let mut peer_address = stream.peer_addr()?;
+    let peer_address = stream.peer_addr()?;
     let first_response = format!("+FULLRESYNC {} 0\r\n", info.master_replid);
 
     stream.write_all(first_response.as_bytes()).await?;
@@ -221,7 +197,7 @@ async fn handle_psync_command(
     stream.write_all(rdb_bytes.as_slice()).await?;
 
     stream.flush().await?;
-    let (read_half, mut write_half) = stream.into_split();
+    let (read_half, write_half) = stream.into_split();
     manager
         .lock()
         .await
@@ -298,7 +274,7 @@ fn handle_info_command(_command: String, info: Arc<ServerInfo>) -> RespValue {
 async fn handle_keys_command(command: String, store: Arc<Store>) -> RespValue {
     match command.as_str() {
         "*" => store.keys().await,
-        other => RespValue::Array(vec![]),
+        _ => RespValue::Array(vec![]),
     }
 }
 
@@ -351,7 +327,7 @@ fn encode_stream(resp: Vec<(StreamID, StreamEntry)>) -> Vec<RespValue> {
 async fn poll_xread(
     store: &Arc<Store>,
     keys: &Vec<String>,
-    ids: &Vec<String>,
+    ids: &Vec<StreamID>,
 ) -> io::Result<Vec<RespValue>> {
     let mut outer = vec![];
     for (key, id) in keys.iter().zip(ids) {
@@ -363,4 +339,90 @@ async fn poll_xread(
         }
     }
     Ok(outer)
+}
+
+async fn try_poll_xread(
+    store: &Arc<Store>,
+    keys: &Vec<String>,
+    ids: &Vec<StreamID>,
+) -> io::Result<Option<RespValue>> {
+    let result = poll_xread(store, keys, ids).await?;
+    if result.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(RespValue::Array(result)))
+    }
+}
+async fn wait_with_timeout(
+    store: &Arc<Store>,
+    keys: &Vec<String>,
+    ids: &Vec<StreamID>,
+    notifiers: &Vec<Arc<Notify>>,
+    timeout_ms: u64,
+) -> io::Result<Option<RespValue>> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let futures = notifiers
+        .iter()
+        .map(|n| Box::pin(n.notified()))
+        .collect::<Vec<_>>();
+
+    tokio::select! {
+        _ = select_all(futures) => {
+            try_poll_xread(store, keys, ids).await
+        }
+        _ = tokio::time::sleep(timeout) => {
+            Ok(Some(RespValue::BulkString(None)))
+        }
+    }
+}
+
+async fn wait_forever(
+    store: &Arc<Store>,
+    keys: &Vec<String>,
+    ids: &Vec<StreamID>,
+    notifiers: &Vec<Arc<Notify>>,
+) -> io::Result<Option<RespValue>> {
+    println!("Waiting Forever .");
+
+    loop {
+        let futures = notifiers
+            .iter()
+            .map(|n| Box::pin(n.notified()))
+            .collect::<Vec<_>>();
+
+        tokio::select! {
+            _ = select_all(futures) => {
+                println!("Waiting Forever called.");
+                            task::yield_now().await;
+
+                if let Some(resp) = try_poll_xread(store, keys, ids).await? {
+                    dbg!(&resp);
+                    return Ok(Some(resp));
+                }
+            }
+        }
+    }
+}
+
+async fn xread_command(
+    store: &Arc<Store>,
+    block: &Option<u64>,
+    keys: &Vec<String>,
+    ids: &Vec<String>,
+) -> io::Result<Option<RespValue>> {
+    let ids = store.resolve_stream_ids(keys, ids).await?;
+    // First, check if any stream already has entries
+    if let Some(result) = try_poll_xread(store, keys, &ids).await? {
+        return Ok(Some(result));
+    }
+
+    // Get notifiers for the keys
+    let notifiers = store.get_notifiers(keys).await?;
+
+    // Decide whether to wait with timeout or wait forever
+    match block {
+        Some(0) => wait_forever(store, keys, &ids, &notifiers).await, // <- changed
+        Some(ms) => wait_with_timeout(store, keys, &ids, &notifiers, *ms).await,
+        None => try_poll_xread(store, keys, &ids).await,
+    }
 }

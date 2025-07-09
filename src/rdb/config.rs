@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    fs::File,
-    io::{self, BufReader, Read},
+    io::{self},
     path::Path,
 };
 

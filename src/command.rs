@@ -1,11 +1,7 @@
-use std::collections::HashMap;
 
 use futures::io;
 
-use crate::{
-    resp::{self, RespValue},
-    shared_store::stream_id::StreamID,
-};
+use crate::resp::RespValue;
 
 #[derive(Debug, Clone)]
 pub enum ConfigCommand {
@@ -180,7 +176,7 @@ fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
 fn parse_xadd(command: Command) -> Result<RespCommand, io::Error> {
     let key = command.args[0].clone();
     let id = command.args[1].clone();
-    let mut pairs = command.args.iter().skip(2);
+    let pairs = command.args.iter().skip(2);
     let rest = &command.args[2..];
 
     if rest.len() % 2 != 0 {

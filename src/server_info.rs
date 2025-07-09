@@ -3,7 +3,7 @@ use std::io::{self, BufRead};
 use futures::{SinkExt, StreamExt};
 use std::io::Read;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     net::TcpStream,
 };
 use tokio_util::codec::Framed;
@@ -123,7 +123,7 @@ impl ServerInfo {
             return Ok(None);
         }
         if let (Some(host), Some(port)) = (&self.repl_host, self.repl_port) {
-            let mut stream = TcpStream::connect((host.as_str(), port)).await?;
+            let stream = TcpStream::connect((host.as_str(), port)).await?;
             let mut framed = Framed::new(stream, RespCodec);
             framed
                 .send(RespValue::Array(vec![RespValue::BulkString(Some(

@@ -1,11 +1,10 @@
 use futures::{io, SinkExt};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 use tokio::{
-    net::{tcp::OwnedWriteHalf, TcpStream},
-    sync::mpsc::{self, Receiver, Sender},
-    time::interval,
+    net::tcp::OwnedWriteHalf,
+    sync::mpsc::{self, Sender},
 };
-use tokio_util::codec::{Framed, FramedWrite};
+use tokio_util::codec::FramedWrite;
 
 use crate::{
     command::{ReplconfCommand, RespCommand},

@@ -4,11 +4,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::sync::Mutex;
-use tokio::time::interval;
-use tokio::{net::TcpStream, sync::mpsc};
 
-use crate::command::{ReplconfCommand, RespCommand};
-use crate::error_helpers::{invalid_data, invalid_data_err};
+use crate::command::RespCommand;
 use crate::replication_manager::replica::Replica;
 
 pub struct ReplicationManager {
@@ -40,7 +37,7 @@ impl ReplicationManager {
         Ok(())
     }
 
-    pub async fn replica_count(&self, offset: u64) -> io::Result<(usize)> {
+    pub async fn replica_count(&self, offset: u64) -> io::Result<usize> {
         let guard = self.replicas.lock().await;
         let len = guard.values().filter(|r| r.acknowledged_offset >= offset).count();
         Ok(len)
