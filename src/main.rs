@@ -14,8 +14,7 @@ use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::codec::Framed;
 
 use crate::{
-    error_helpers::invalid_data_err, rdb::config::RdbConfig,
-    replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::shared_store::Store,
+    error_helpers::invalid_data_err, handlers::{master::handle_master_connection, replication::handle_replication_connection}, rdb::config::RdbConfig, replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::shared_store::Store
 };
 
 #[tokio::main]
@@ -50,7 +49,7 @@ async fn main() -> std::io::Result<()> {
                 let replication_manager_clone = replication_manager.clone();
                 // Spawn a new async task to handle the connection
                 tokio::spawn(async move {
-                    if let Err(e) = handlers::handle_master_connection(
+                    if let Err(e) = handle_master_connection(
                         socket,
                         store_clone,
                         rdb_clone,
@@ -68,12 +67,8 @@ async fn main() -> std::io::Result<()> {
         "slave" => {
             let listener = TcpListener::bind(&peer_address).await?;
             println!("Slave listening on {}", peer_address);
-
             let info_clone_for_handshake = info.clone();
             let store_clone_for_handshake = store.clone();
-            let rdb_clone_for_handshake = rdb.clone();
-            let replication_manager_clone_for_handshake = replication_manager.clone();
-
             tokio::spawn(async move {
                 match info_clone_for_handshake.handshake().await {
                     Ok(Some((socket, other))) => {
@@ -101,14 +96,12 @@ async fn main() -> std::io::Result<()> {
                 let (socket, addr) = listener.accept().await?;
                 println!("New connection from {}", addr);
                 let store_clone = store.clone();
-                let rdb_clone = rdb.clone();
                 let info_clone = info.clone();
-                let replication_manager_clone = replication_manager.clone();
                 // Spawn a new async task to handle the client connection
                 tokio::spawn(async move {
                     let mut framed = Framed::new(socket, resp::RespCodec);
 
-                    if let Err(e) = handlers::handle_replication_connection(
+                    if let Err(e) = handle_replication_connection(
                         &mut framed,
                         store_clone,
                         info_clone,
@@ -139,7 +132,7 @@ fn setup_master_listener(framed: ArcFrame, store: Arc<Store>, info: Arc<ServerIn
     tokio::spawn(async move {
         let mut guard = framed.lock().await;
 
-        handlers::handle_replication_connection(&mut guard, store, info)
+        handle_replication_connection(&mut guard, store, info)
             .await
             .map_err(|e| invalid_data_err(format!("Replication Listener had error, {}", e)))
     });

@@ -1,5 +1,5 @@
 use futures::io;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Notify, RwLock};
@@ -14,7 +14,7 @@ use crate::shared_store::stream_id::StreamID;
 pub enum RedisValue {
     Text(Vec<u8>),
     Stream(Stream),
-    // Add ZSet, List, etc. as needed
+    Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +64,7 @@ impl Store {
             Some(redis_value) => match redis_value {
                 RedisValue::Stream(_) => Ok(RespValue::SimpleString("stream".into())),
                 RedisValue::Text(_) => Ok(RespValue::SimpleString("string".into())),
+                RedisValue::Queue(_) => Ok(RespValue::SimpleString("queue".into())),
             },
             None => Ok(RespValue::SimpleString("none".into())),
         }
@@ -134,9 +135,42 @@ impl Store {
         RespValue::Array(values)
     }
 
+    pub async fn incr(&self, key: &String) -> io::Result<Option<RespValue>> {
+        let mut map = self.keyspace.write().await;
+        let error = Ok(Some(RespValue::Error(
+            "ERR value is not an integer or out of range".into(),
+        )));
+        if let Some(previous) = map.get_mut(key) {
+            match &previous.value {
+                RedisValue::Text(value) => {
+                    let copy = value.clone();
+                    let string_value = match String::from_utf8(copy) {
+                        Ok(s) => s,
+                        Err(_) => return error,
+                    };
+                    let mut number = match string_value.parse::<i64>() {
+                        Ok(i) => i,
+                        Err(_) => return error,
+                    };
+                    number += 1;
+                    let new_value = (number).to_string().into_bytes();
+                    previous.value = RedisValue::Text(new_value);
+                    Ok(Some(RespValue::Integer(number )))
+                }
+
+                _ => error,
+            }
+        } else {
+            let entry = Entry {
+                value: RedisValue::Text("1".as_bytes().into()),
+                expires_at: None,
+            };
+            map.insert(key.clone(), entry);
+            Ok(Some(RespValue::Integer(1)))
+        }
+    }
     pub async fn set(&self, key: &str, value: Vec<u8>, px: Option<u64>) {
-        let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
-            self.keyspace.write().await;
+        let mut map = self.keyspace.write().await;
         let expires_at = px.map(|ms| Instant::now() + Duration::from_millis(ms));
 
         let entry = Entry::new(RedisValue::Text(value), expires_at);
@@ -227,14 +261,16 @@ impl Store {
 
         if let Some(entry) = map.get_mut(key) {
             match &mut entry.value {
-                RedisValue::Text(_) => {
-                    return Err(invalid_data_err("ERR calling Text Value with stream key"));
-                }
                 RedisValue::Stream(stream) => {
                     let stream_id: StreamID =
                         StreamID::from_redis_input(Some(*stream.previous_id()), id)?;
                     stream.append(stream_id.clone(), fields)?;
                     Ok(stream_id.to_string())
+                }
+                _ => {
+                    return Err(invalid_data_err(
+                        "ERR calling None Stream Value with stream key",
+                    ));
                 }
             }
         } else {

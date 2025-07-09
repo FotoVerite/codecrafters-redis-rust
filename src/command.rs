@@ -1,4 +1,3 @@
-
 use futures::io;
 
 use crate::resp::RespValue;
@@ -18,21 +17,22 @@ pub enum ReplconfCommand {
 
 #[derive(Debug, Clone)]
 pub enum RespCommand {
-    Get(String),
-    Ping,
+    ConfigCommand(ConfigCommand),
     Echo(String),
+    Get(String),
+    Incr(String),
+    Info(String),
+    Keys(String),
+    Ping,
+    PSYNC(String, i64),
+    RDB(Option<Vec<u8>>),
+    ReplconfCommand(ReplconfCommand),
     Set {
         key: String,
         value: Vec<u8>,
         px: Option<u64>,
     },
     Type(String),
-    ConfigCommand(ConfigCommand),
-    Keys(String),
-    Info(String),
-    ReplconfCommand(ReplconfCommand),
-    RDB(Option<Vec<u8>>),
-    PSYNC(String, i64),
     Wait(String, String),
     Xadd {
         key: String,
@@ -50,6 +50,12 @@ pub enum RespCommand {
         keys: Vec<String>,
         ids: Vec<String>,
     },
+}
+
+impl std::fmt::Display for RespCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl RespCommand {
@@ -104,6 +110,7 @@ impl Command {
                     "type" => Ok(RespCommand::Type(command.args[0].clone())),
                     "config" => parse_config(command),
                     "keys" => Ok(RespCommand::Keys(command.args[0].clone())),
+                    "incr" => Ok(RespCommand::Incr(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
                     "psync" => parse_psync(command),
@@ -176,7 +183,6 @@ fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
 fn parse_xadd(command: Command) -> Result<RespCommand, io::Error> {
     let key = command.args[0].clone();
     let id = command.args[1].clone();
-    let pairs = command.args.iter().skip(2);
     let rest = &command.args[2..];
 
     if rest.len() % 2 != 0 {
