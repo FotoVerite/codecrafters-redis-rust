@@ -2,7 +2,7 @@ use crate::command::RespCommand;
 
 pub struct Session {
     pub in_multi: bool,
-    pub queued: Vec<RespCommand>,
+    pub queued: Vec<(RespCommand, Vec<u8>)>,
     pub client_id: u64, // optional
 }
 
@@ -14,6 +14,4 @@ impl Session {
             client_id: 1,
         }
     }
-
-   
 }

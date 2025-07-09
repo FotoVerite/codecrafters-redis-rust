@@ -25,6 +25,7 @@ pub enum RespCommand {
     Keys(String),
     Multi,
     Exec,
+    Discard,
     Ping,
     PSYNC(String, i64),
     RDB(Option<Vec<u8>>),
@@ -106,6 +107,7 @@ impl Command {
                 let command = Command::new(a)?;
                 match command.name.to_ascii_lowercase().as_str() {
                     "multi" => Ok(RespCommand::Multi),
+                    "discard" => Ok(RespCommand::Discard),
                     "exec" => Ok(RespCommand::Exec),
                     "ping" => Ok(RespCommand::Ping),
                     "echo" => Ok(RespCommand::Echo(command.args[0].clone())),

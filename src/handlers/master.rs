@@ -50,74 +50,115 @@ pub async fn handle_master_connection(
             match command {
                 RespCommand::Exec => {
                     if session.queued.is_empty() {
-                     framed.send(RespValue::Array(vec![])).await?; 
+                        framed.send(RespValue::Array(vec![])).await?;
                     }
+                    let queue = session.queued.clone();
+                    for (command, bytes) in queue {
+                        process_command(
+                            &mut framed,
+                            store.clone(),
+                            rdb.clone(),
+                            manager.clone(),
+                            info.clone(),
+                            &mut session,
+                            command,
+                            bytes,
+                            &mut peer_addr,
+                        )
+                        .await?;
+                    }
+                    session.queued.clear();
+                    session.in_multi = false;
+                }
+                RespCommand::Discard => {
+                    session.queued.clear();
                     session.in_multi = false;
                 }
                 _ => {
-                    session.queued.push(command);
+                    session.queued.push((command, bytes));
                     framed
                         .send(RespValue::BulkString(Some("QUEUED".into())))
                         .await?;
                 }
             }
-            return Ok(());
+            continue;
         }
-
-        let response_value = match command {
-            RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
-            RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
-            RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
-            RespCommand::Multi => {
-                session.in_multi = true;
-                Some(RespValue::SimpleString("OK".into()))
-            }
-            RespCommand::Incr(key) => store.incr(&key).await?,
-            RespCommand::Get(key) => Some(store.get(&key).await?),
-            RespCommand::Set { key, value, px } => {
-                set::set_command(&store, &manager, key, &value, px, bytes).await?
-            }
-            RespCommand::Type(key) => type_command::type_command(&store, key).await?,
-            RespCommand::ConfigCommand(command) => {
-                Some(config::config_command(command, rdb.clone()))
-            }
-            RespCommand::Keys(string) => {
-                Some(super::keys::keys_command(string, store.clone()).await)
-            }
-            RespCommand::Info(string) => Some(super::info::info_command(string, info.clone())),
-            RespCommand::ReplconfCommand(command) => Some(handle_replconf_command(
-                command,
-                info.clone(),
-                &mut peer_addr,
-            )),
-            RespCommand::RDB(_) => None,
-            RespCommand::Wait(required_replicas, timeout_ms) => {
-                wait::wait_command(&store, &manager, required_replicas, timeout_ms).await?
-            }
-
-            RespCommand::Xadd { key, id, fields } => {
-                xadd::xadd_command(&store, key, id, fields, bytes).await?
-            } // Should be handled above
-            RespCommand::Xrange { key, start, end } => {
-                xrange::xrange_command(&store, key, start, end).await?
-            }
-            RespCommand::Xread {
-                count,
-                block,
-                keys,
-                ids,
-            } => stream::xread_command(&store, &block, &keys, &ids).await?,
-            _ => {
-                unimplemented!("{:?}", format!("{}", command))
-            }
-        };
-
-        println!("Sending: {:?}", &response_value);
-
-        if let Some(value) = response_value {
-            framed.send(value).await?;
-        }
+        process_command(
+            &mut framed,
+            store.clone(),
+            rdb.clone(),
+            manager.clone(),
+            info.clone(),
+            &mut session,
+            command,
+            bytes,
+            &mut peer_addr,
+        )
+        .await?;
     }
 
+    Ok(())
+}
+
+async fn process_command(
+    framed: &mut Framed<TcpStream, RespCodec>,
+    store: Arc<Store>,
+    rdb: Arc<RdbConfig>,
+    manager: Arc<Mutex<ReplicationManager>>,
+    info: Arc<ServerInfo>,
+    session: &mut Session,
+    command: RespCommand,
+    bytes: Vec<u8>,
+    peer_addr: &mut Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response_value = match command {
+        RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
+        RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
+        RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
+        RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
+
+        RespCommand::Multi => {
+            session.in_multi = true;
+            Some(RespValue::SimpleString("OK".into()))
+        }
+        RespCommand::Incr(key) => store.incr(&key).await?,
+        RespCommand::Get(key) => Some(store.get(&key).await?),
+        RespCommand::Set { key, value, px } => {
+            set::set_command(&store, &manager, key, &value, px, bytes).await?
+        }
+        RespCommand::Type(key) => type_command::type_command(&store, key).await?,
+        RespCommand::ConfigCommand(command) => Some(config::config_command(command, rdb.clone())),
+        RespCommand::Keys(string) => Some(super::keys::keys_command(string, store.clone()).await),
+        RespCommand::Info(string) => Some(super::info::info_command(string, info.clone())),
+        RespCommand::ReplconfCommand(command) => {
+            Some(handle_replconf_command(command, info.clone(), peer_addr))
+        }
+        RespCommand::RDB(_) => None,
+        RespCommand::Wait(required_replicas, timeout_ms) => {
+            wait::wait_command(&store, &manager, required_replicas, timeout_ms).await?
+        }
+
+        RespCommand::Xadd { key, id, fields } => {
+            xadd::xadd_command(&store, key, id, fields, bytes).await?
+        } // Should be handled above
+        RespCommand::Xrange { key, start, end } => {
+            xrange::xrange_command(&store, key, start, end).await?
+        }
+        RespCommand::Xread {
+            count,
+            block,
+            keys,
+            ids,
+        } => stream::xread_command(&store, &block, &keys, &ids).await?,
+        _ => {
+            unimplemented!("{:?}", format!("{}", command))
+        }
+    };
+
+    println!("Sending: {:?}", &response_value);
+
+    if let Some(value) = response_value {
+        framed.send(value).await?;
+    }
     Ok(())
 }
