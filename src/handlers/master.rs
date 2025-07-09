@@ -18,6 +18,14 @@ use crate::{
     shared_store::shared_store::Store,
 };
 
+pub struct CommandContext {
+    pub store: Arc<Store>,
+    pub rdb: Arc<RdbConfig>,
+    pub manager: Arc<Mutex<ReplicationManager>>,
+    pub info: Arc<ServerInfo>,
+    pub session: Session,
+}
+
 pub async fn handle_master_connection(
     socket: TcpStream,
     store: Arc<Store>,
@@ -46,29 +54,39 @@ pub async fn handle_master_connection(
                 break; // End the loop for this connection
             }
         }
+        dbg!(session.in_multi);
         if session.in_multi {
             match command {
                 RespCommand::Exec => {
+                    session.in_multi = false;
                     if session.queued.is_empty() {
                         framed.send(RespValue::Array(vec![])).await?;
+                        continue;
                     }
-                    let queue = session.queued.clone();
-                    for (command, bytes) in queue {
-                        process_command(
+                    let mut responses = Vec::new();
+                    let queue = &session.queued.clone();
+                    for (queued_command, bytes) in queue {
+                        let response = process_command(
                             &mut framed,
                             store.clone(),
                             rdb.clone(),
                             manager.clone(),
                             info.clone(),
                             &mut session,
-                            command,
-                            bytes,
+                            queued_command.clone(),
+                            bytes.clone(),
                             &mut peer_addr,
                         )
                         .await?;
+
+                        if let Some(resp) = response {
+                            responses.push(resp);
+                        } else {
+                        }
                     }
+
+                    framed.send(RespValue::Array(responses)).await?;
                     session.queued.clear();
-                    session.in_multi = false;
                 }
                 RespCommand::Discard => {
                     session.queued.clear();
@@ -83,7 +101,7 @@ pub async fn handle_master_connection(
             }
             continue;
         }
-        process_command(
+        let response_value = process_command(
             &mut framed,
             store.clone(),
             rdb.clone(),
@@ -95,6 +113,12 @@ pub async fn handle_master_connection(
             &mut peer_addr,
         )
         .await?;
+
+        println!("Sending: {:?}", &response_value);
+
+        if let Some(value) = response_value {
+            framed.send(value).await?;
+        }
     }
 
     Ok(())
@@ -110,7 +134,7 @@ async fn process_command(
     command: RespCommand,
     bytes: Vec<u8>,
     peer_addr: &mut Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Option<RespValue>, Box<dyn std::error::Error>> {
     let response_value = match command {
         RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
@@ -155,10 +179,5 @@ async fn process_command(
         }
     };
 
-    println!("Sending: {:?}", &response_value);
-
-    if let Some(value) = response_value {
-        framed.send(value).await?;
-    }
-    Ok(())
+    Ok(response_value)
 }
