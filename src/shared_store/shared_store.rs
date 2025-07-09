@@ -2,12 +2,12 @@ use futures::io;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio::time::Instant;
 
 use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
-use crate::shared_store::redis_stream::{Stream, StreamEntries};
+use crate::shared_store::redis_stream::{Stream, StreamEntries, StreamEntry};
 use crate::shared_store::stream_id::StreamID;
 
 #[derive(Debug, Clone)]
@@ -156,9 +156,9 @@ impl Store {
         }
     }
 
-    pub async fn xread(&self, key: String, start: String) -> io::Result<StreamEntries> {
+    pub async fn xread(&self, key: &String, start: &String) -> io::Result<StreamEntries> {
         let map = self.keyspace.read().await;
-        match map.get(&key) {
+        match map.get(key) {
             Some(entry) => match &entry.value {
                 RedisValue::Stream(stream) => {
                     let range = stream.get_from(start.as_str().try_into()?);
@@ -172,14 +172,29 @@ impl Store {
         }
     }
 
+    pub async fn get_notifiers(&self, keys: &Vec<String>) -> io::Result<Vec<Arc<Notify>>> {
+        let map = self.keyspace.read().await;
+        let mut ret = Vec::with_capacity(keys.len());
+        for key in keys {
+            let entry = map
+                .get(key)
+                .ok_or_else(|| invalid_data_err(format!("Missing key: {}", key)))?;
+
+            match &entry.value {
+                RedisValue::Stream(stream) => ret.push(stream.notify.clone()),
+                _ => return invalid_data("Key is not for a stream"),
+            }
+        }
+        Ok(ret)
+    }
+
     pub async fn xadd(
         &self,
         key: &str,
         id: String,
         fields: Vec<(String, String)>,
     ) -> io::Result<String> {
-        let mut map: tokio::sync::RwLockWriteGuard<'_, HashMap<String, Entry>> =
-            self.keyspace.write().await;
+        let mut map = self.keyspace.write().await;
 
         if let Some(entry) = map.get_mut(key) {
             match &mut entry.value {

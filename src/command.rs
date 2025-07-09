@@ -140,19 +140,38 @@ fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
             &command.args[pos + 1..command.args.len()],
         )
     };
+    let mut optional_iter = optional.into_iter();
+    let mut block = None;
+    let mut count = None;
+    while let Some(arg) = optional_iter.next() {
+        match arg.to_ascii_lowercase().as_str() {
+            "block" => {
+                block = optional_iter
+                    .next()
+                    .map(|s| s.parse::<u64>())
+                    .transpose()
+                    .or_else(|e| invalid_data(e.to_string()))?;
+            }
+            "count" => {
+                count = optional_iter
+                    .next()
+                    .map(|s| s.parse::<u64>())
+                    .transpose()
+                    .or_else(|e| invalid_data(e.to_string()))?;
+            }
+            _ => {}
+        }
+    }
     let (keys, stream_ids) = {
         let length = rest.len() / 2;
-        (
-            &rest[..length],
-            &rest[length..],
-        )
+        (&rest[..length], &rest[length..])
     };
     if keys.len() != stream_ids.len() {
-        return invalid_data("Stream Keys must match StreamIds")
+        return invalid_data("Stream Keys must match StreamIds");
     }
     Ok(RespCommand::Xread {
-        count: None,
-        block: None,
+        count,
+        block,
         keys: keys.to_vec(),
         ids: stream_ids.to_vec(),
     })

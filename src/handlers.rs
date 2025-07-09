@@ -1,6 +1,6 @@
 use std::{io, sync::Arc, time::Duration};
 
-use futures::{stream::iter, SinkExt, StreamExt};
+use futures::{future::select_all, stream::iter, SinkExt, StreamExt};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{tcp::OwnedWriteHalf, TcpStream},
@@ -164,15 +164,29 @@ pub async fn handle_master_connection(
                 keys,
                 ids,
             } => {
-                let mut outer = vec![];
-                for (key, id) in keys.iter().zip(ids) {
-                    let resp = store.xread(key.to_string(), id).await?;
-                    let inner = RespValue::Array(encode_stream(resp));
-                    let full = vec![RespValue::BulkString(Some(key.clone().into_bytes())), inner];
-                    outer.push(RespValue::Array(full));
-            
+                let result = poll_xread(&store, &keys, &ids).await?;
+                if !result.is_empty() {
+                    Some(RespValue::Array(result))
+                } else {
+                    let notifiers = store.get_notifiers(&keys).await?;
+                    let futures = notifiers
+                        .iter()
+                        .map(|n| Box::pin(n.notified()))
+                        .collect::<Vec<_>>();
+                    let timeout = Duration::from_millis(block.unwrap_or(0));
+
+                    let selected = tokio::select! {
+
+                                     _ = select_all(futures) => {
+                                         let result = poll_xread(&store, &keys, &ids).await?;
+                    Some(RespValue::Array(result))
+                                     }
+                                    _ = tokio::time::sleep(timeout) => {
+                                        Some(RespValue::BulkString(None))
+                                    }
+                                };
+                    selected
                 }
-                Some(RespValue::Array(outer))
             }
         };
 
@@ -332,4 +346,21 @@ fn encode_stream(resp: Vec<(StreamID, StreamEntry)>) -> Vec<RespValue> {
         }
     }
     outer
+}
+
+async fn poll_xread(
+    store: &Arc<Store>,
+    keys: &Vec<String>,
+    ids: &Vec<String>,
+) -> io::Result<Vec<RespValue>> {
+    let mut outer = vec![];
+    for (key, id) in keys.iter().zip(ids) {
+        let resp = store.xread(key, id).await?;
+        if !resp.is_empty() {
+            let inner = RespValue::Array(encode_stream(resp));
+            let full = vec![RespValue::BulkString(Some(key.clone().into_bytes())), inner];
+            outer.push(RespValue::Array(full));
+        }
+    }
+    Ok(outer)
 }

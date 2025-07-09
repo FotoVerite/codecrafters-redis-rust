@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 use std::io;
-use std::ops::Bound::{Included, Unbounded, Excluded};
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::sync::Arc;
+
+use tokio::sync::Notify;
 
 use crate::error_helpers::invalid_data_err;
 use crate::shared_store::stream_id::StreamID;
@@ -23,6 +26,7 @@ pub enum ControlType {
 
 #[derive(Debug, Clone)]
 pub struct Stream {
+    pub notify: Arc<Notify>,
     entries: BTreeMap<StreamID, StreamEntry>, // ID as key
 }
 
@@ -34,6 +38,7 @@ impl Stream {
         };
         Self::validate_id(&id, self.previous_id())?;
         self.entries.insert(id, entry);
+        self.notify.notify_waiters();
         Ok(())
     }
 
@@ -50,6 +55,7 @@ impl Stream {
 
     pub fn new() -> Self {
         Self {
+            notify: Arc::new(Notify::new()),
             entries: BTreeMap::new(),
         }
     }
