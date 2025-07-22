@@ -15,6 +15,15 @@ pub enum ReplconfCommand {
     Getack(String),
     Ack(String),
 }
+#[derive(Debug, Clone)]
+enum PushDirection {
+    LPush,
+    RPush,
+    LPushX,
+    RPushX,
+    LInsertBefore,
+    LInsertAfter,
+}
 
 #[derive(Debug, Clone)]
 pub enum RespCommand {
@@ -57,6 +66,10 @@ pub enum RespCommand {
         ids: Vec<String>,
     },
     Rpush {
+        key: String,
+        values: Vec<Vec<u8>>,
+    },
+    Lpush {
         key: String,
         values: Vec<Vec<u8>>,
     },
@@ -131,8 +144,8 @@ impl Command {
                     "incr" => Ok(RespCommand::Incr(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
-
-                    "rpush" => parse_rpush(command),
+                    "lpush" => parse_push_command(command, PushDirection::LPush),
+                    "rpush" => parse_push_command(command, PushDirection::RPush),
                     "lrange" => parse_lrange(command),
 
                     "psync" => parse_psync(command),
@@ -154,24 +167,33 @@ impl Command {
     }
 }
 
-fn parse_rpush(command: Command) -> io::Result<RespCommand> {
+fn parse_push_command(command: Command, lpush: PushDirection) -> io::Result<RespCommand> {
     let key = command.args[0].clone();
-    let values = command
+    let mut values = command
         .args
         .iter()
         .skip(1)
         .map(|s| s.as_bytes().to_vec())
         .collect::<Vec<Vec<u8>>>();
-    Ok(RespCommand::Rpush { key, values })
+    match lpush {
+        PushDirection::LPush => {
+            values.reverse();
+            Ok(RespCommand::Lpush { key, values })
+        }
+        PushDirection::RPush => Ok(RespCommand::Rpush { key, values }),
+        _ => invalid_data("Not implemented"),
+    }
 }
 
 fn parse_lrange(command: Command) -> io::Result<RespCommand> {
     let key = command.args[0].clone();
-    let start = command.args[1].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
-    let end  = command.args[2].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
-    Ok(RespCommand::Lrange {
-        key, start, end
-    })
+    let start = command.args[1]
+        .parse()
+        .map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
+    let end = command.args[2]
+        .parse()
+        .map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
+    Ok(RespCommand::Lrange { key, start, end })
 }
 fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
     let (optional, rest) = {

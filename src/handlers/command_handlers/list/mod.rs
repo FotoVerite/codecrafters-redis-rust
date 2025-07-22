@@ -8,6 +8,12 @@ pub async  fn rpush(store: Arc<Store>, key: String, values: Vec<Vec<u8>>) -> io:
     Ok(Some(result))
 }
 
+pub async  fn lpush(store: Arc<Store>, key: String, values: Vec<Vec<u8>>) -> io::Result<Option<RespValue>> {
+    let len = store.lpush( key, values).await?;
+    let result = RespValue::Integer(len as i64);
+    Ok(Some(result))
+}
+
 pub async  fn lrange(store: Arc<Store>, key: String, start: isize, end: isize) -> io::Result<Option<RespValue>> {
     let values = store.lrange( key, start, end).await?;
     let mut arr = vec![];

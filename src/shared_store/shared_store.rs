@@ -200,6 +200,27 @@ impl Store {
         }
     }
 
+    pub async fn lpush(&self, key: String, mut values: Vec<Vec<u8>>) -> io::Result<usize> {
+        let mut map = self.keyspace.write().await;
+        match map.get_mut(&key) {
+            Some(entry) => match &mut entry.value {
+                RedisValue::List(arr) => {
+                    values.extend(arr.drain(..));
+                    *arr = values.clone();
+                    Ok(arr.len())
+                }
+                _ => Err(invalid_data_err(
+                    "ERR LPUSH on key holding the wrong kind of value",
+                )),
+            },
+            None => {
+                let entry: Entry = Entry::new(RedisValue::List(values.clone()), None);
+                map.insert(key, entry);
+                Ok(values.iter().count().clone())
+            }
+        }
+    }
+
     pub async fn lrange(
         &self,
         key: String,
