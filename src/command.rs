@@ -69,6 +69,7 @@ pub enum RespCommand {
         key: String,
         values: Vec<Vec<u8>>,
     },
+    Llen(String),
     Lpush {
         key: String,
         values: Vec<Vec<u8>>,
@@ -144,6 +145,7 @@ impl Command {
                     "incr" => Ok(RespCommand::Incr(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
+                    "llen" => Ok(RespCommand::Llen(command.args[0].clone())),
                     "lpush" => parse_push_command(command, PushDirection::LPush),
                     "rpush" => parse_push_command(command, PushDirection::RPush),
                     "lrange" => parse_lrange(command),

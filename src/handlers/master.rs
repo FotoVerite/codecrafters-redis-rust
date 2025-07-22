@@ -141,9 +141,10 @@ async fn process_command(
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
+        RespCommand::Llen(key)=> list::llen(store, key).await?,
         RespCommand::Lpush { key, values } => list::lpush(store, key, values).await?,
         RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
-        RespCommand::Lrange { key, start , end} => list::lrange(store, key, start , end).await?,
+        RespCommand::Lrange { key, start, end } => list::lrange(store, key, start, end).await?,
 
         RespCommand::Multi => {
             session.in_multi = true;

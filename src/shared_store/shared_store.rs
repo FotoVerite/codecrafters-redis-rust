@@ -221,6 +221,25 @@ impl Store {
         }
     }
 
+     pub async fn llen(
+        &self,
+        key: String,
+    ) -> io::Result<usize> {
+        let map = self.keyspace.read().await;
+        match map.get(&key) {
+            Some(entry) => match &entry.value {
+                RedisValue::List(arr) => {
+                    let len = arr.len();
+                    return Ok(len);
+                }
+                _ => Err(invalid_data_err(
+                    "ERR LPUSH on key holding the wrong kind of value",
+                )),
+            },
+            None => Ok(0),
+        }
+    }
+
     pub async fn lrange(
         &self,
         key: String,
