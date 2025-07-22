@@ -20,7 +20,6 @@ impl List {
 
     pub fn lpop(&mut self, amount: usize) -> io::Result<Option<Vec<Vec<u8>>>> {
         if self.entries.is_empty() {
-            self.notify.notify_waiters();
             return Ok(None);
         }
         let values = self.entries.drain(..amount).collect();
