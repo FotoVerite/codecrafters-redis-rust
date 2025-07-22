@@ -70,6 +70,7 @@ pub enum RespCommand {
         values: Vec<Vec<u8>>,
     },
     Llen(String),
+    Lpop(String, usize),
     Lpush {
         key: String,
         values: Vec<Vec<u8>>,
@@ -146,6 +147,7 @@ impl Command {
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
                     "llen" => Ok(RespCommand::Llen(command.args[0].clone())),
+                    "lpop" => parse_pop_command(command),
                     "lpush" => parse_push_command(command, PushDirection::LPush),
                     "rpush" => parse_push_command(command, PushDirection::RPush),
                     "lrange" => parse_lrange(command),
@@ -169,6 +171,16 @@ impl Command {
     }
 }
 
+fn parse_pop_command(command: Command) -> io::Result<RespCommand> {
+    let key = command.args[0].clone();
+    let arg = match command.args.get(1) {
+        Some(arg) => arg
+            .parse()
+            .map_err(|_| invalid_data_err("Unable to parse param"))?,
+        None => 1usize,
+    };
+    Ok(RespCommand::Lpop(key, arg))
+}
 fn parse_push_command(command: Command, lpush: PushDirection) -> io::Result<RespCommand> {
     let key = command.args[0].clone();
     let mut values = command

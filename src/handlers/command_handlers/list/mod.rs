@@ -2,28 +2,52 @@ use std::{io, sync::Arc};
 
 use crate::{resp::RespValue, shared_store::shared_store::Store};
 
-pub async  fn rpush(store: Arc<Store>, key: String, values: Vec<Vec<u8>>) -> io::Result<Option<RespValue>> {
-    let len = store.rpush( key, values).await?;
+pub async fn rpush(
+    store: Arc<Store>,
+    key: String,
+    values: Vec<Vec<u8>>,
+) -> io::Result<Option<RespValue>> {
+    let len = store.rpush(key, values).await?;
     let result = RespValue::Integer(len as i64);
     Ok(Some(result))
 }
 
-pub async  fn llen(store: Arc<Store>, key: String) -> io::Result<Option<RespValue>> {
-    let len = store.llen( key).await?;
+pub async fn llen(store: Arc<Store>, key: String) -> io::Result<Option<RespValue>> {
+    let len = store.llen(key).await?;
     let result = RespValue::Integer(len as i64);
     Ok(Some(result))
 }
 
-pub async  fn lpush(store: Arc<Store>, key: String, values: Vec<Vec<u8>>) -> io::Result<Option<RespValue>> {
-    let len = store.lpush( key, values).await?;
+pub async fn lpop(store: Arc<Store>, key: String, amount: usize) -> io::Result<Option<RespValue>> {
+    match store.lpop(key, amount).await? {
+        None => Ok(Some(RespValue::BulkString(None))),
+        Some(mut values) if values.len() == 1 => Ok(Some(RespValue::BulkString(values.pop()))),
+        Some(values) => Ok(Some(RespValue::Array(
+            values
+                .into_iter()
+                .map(|v| RespValue::BulkString(Some(v)))
+                .collect(),
+        ))),
+    }
+}
+
+pub async fn lpush(
+    store: Arc<Store>,
+    key: String,
+    values: Vec<Vec<u8>>,
+) -> io::Result<Option<RespValue>> {
+    let len = store.lpush(key, values).await?;
     let result = RespValue::Integer(len as i64);
     Ok(Some(result))
 }
 
-
-
-pub async  fn lrange(store: Arc<Store>, key: String, start: isize, end: isize) -> io::Result<Option<RespValue>> {
-    let values = store.lrange( key, start, end).await?;
+pub async fn lrange(
+    store: Arc<Store>,
+    key: String,
+    start: isize,
+    end: isize,
+) -> io::Result<Option<RespValue>> {
+    let values = store.lrange(key, start, end).await?;
     let mut arr = vec![];
     for v in values {
         arr.push(RespValue::BulkString(Some(v)));

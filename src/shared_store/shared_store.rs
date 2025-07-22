@@ -200,6 +200,25 @@ impl Store {
         }
     }
 
+    pub async fn lpop(&self, key: String, amount: usize) -> io::Result<Option<Vec<Vec<u8>>>> {
+        let mut map = self.keyspace.write().await;
+        match map.get_mut(&key) {
+            Some(entry) => match &mut entry.value {
+                RedisValue::List(arr) => {
+                  let value = arr.drain(..amount).collect();
+                  Ok(Some(value))
+                }
+                _ => Err(invalid_data_err(
+                    "ERR LPOP on key holding the wrong kind of value",
+                )),
+            },
+            None => {
+               
+                Ok(None)
+            }
+        }
+    }
+
     pub async fn lpush(&self, key: String, mut values: Vec<Vec<u8>>) -> io::Result<usize> {
         let mut map = self.keyspace.write().await;
         match map.get_mut(&key) {
