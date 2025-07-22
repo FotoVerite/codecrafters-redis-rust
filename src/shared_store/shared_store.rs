@@ -203,26 +203,31 @@ impl Store {
     pub async fn lrange(
         &self,
         key: String,
-        start: isize,
+        mut start: isize,
         mut end: isize,
     ) -> io::Result<Vec<Vec<u8>>> {
-        if start > end {
-            return Ok(vec![])
-        }
         let map = self.keyspace.read().await;
         match map.get(&key) {
             Some(entry) => match &entry.value {
                 RedisValue::List(arr) => {
-                    let length = arr.len() as isize;
-                    if start > length - 1 {
+                    let len = arr.len() as isize;
+                    if start < 0 {
+                        start += len;
+                    }
+                    if end < 0 {
+                        end += len;
+                    }
+
+                    // Clamp to bounds
+                    start = start.max(0);
+                    end = end.min(len - 1);
+                    if start > end || start >= len {
                         return Ok(vec![]);
                     }
-                    if end > length - 1 {
-                        end = length - 1;
-                    }
+
                     let u_start = start as usize;
-                    let u_end =( end + 1) as usize;
-                    return Ok(arr[u_start..u_end].to_vec())
+                    let u_end = (end + 1) as usize;
+                    return Ok(arr[u_start..u_end].to_vec());
                 }
                 _ => Err(invalid_data_err(
                     "ERR LPUSH on key holding the wrong kind of value",
