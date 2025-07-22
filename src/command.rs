@@ -57,9 +57,14 @@ pub enum RespCommand {
         ids: Vec<String>,
     },
     Rpush {
-        key: String, 
-        values: Vec<Vec<u8>>
-    }
+        key: String,
+        values: Vec<Vec<u8>>,
+    },
+    Lpush {
+        key: String,
+        start: isize,
+        end: isize,
+    },
 }
 
 impl std::fmt::Display for RespCommand {
@@ -126,7 +131,10 @@ impl Command {
                     "incr" => Ok(RespCommand::Incr(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
+
                     "rpush" => parse_rpush(command),
+                    "lpush" => parse_lpush(command),
+
                     "psync" => parse_psync(command),
                     "wait" => Ok(RespCommand::Wait(
                         command.args[0].clone(),
@@ -148,8 +156,22 @@ impl Command {
 
 fn parse_rpush(command: Command) -> io::Result<RespCommand> {
     let key = command.args[0].clone();
-    let values = command.args.iter().skip(1).map(|s| s.as_bytes().to_vec()).collect::<Vec<Vec<u8>>>();
+    let values = command
+        .args
+        .iter()
+        .skip(1)
+        .map(|s| s.as_bytes().to_vec())
+        .collect::<Vec<Vec<u8>>>();
     Ok(RespCommand::Rpush { key, values })
+}
+
+fn parse_lpush(command: Command) -> io::Result<RespCommand> {
+    let key = command.args[0].clone();
+    let start = command.args[1].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
+    let end  = command.args[2].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
+    Ok(RespCommand::Lpush {
+        key, start, end
+    })
 }
 fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
     let (optional, rest) = {

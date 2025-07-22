@@ -7,7 +7,9 @@ use crate::{
     command::{self, RespCommand},
     handlers::{
         command_handlers::{
-            config, list::{self, rpush}, psync, set, stream, type_command, wait, xadd, xrange,
+            config,
+            list::{self, rpush},
+            psync, set, stream, type_command, wait, xadd, xrange,
         },
         replication::handle_replconf_command,
         session::Session,
@@ -140,6 +142,8 @@ async fn process_command(
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
         RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
+        RespCommand::Lpush { key, start , end} => list::lrange(store, key, start , end).await?,
+
         RespCommand::Multi => {
             session.in_multi = true;
             Some(RespValue::SimpleString("OK".into()))

@@ -200,6 +200,38 @@ impl Store {
         }
     }
 
+    pub async fn lpush(
+        &self,
+        key: String,
+        start: isize,
+        mut end: isize,
+    ) -> io::Result<Vec<Vec<u8>>> {
+        if start > end {
+            return Ok(vec![])
+        }
+        let map = self.keyspace.read().await;
+        match map.get(&key) {
+            Some(entry) => match &entry.value {
+                RedisValue::List(arr) => {
+                    let length = arr.iter().count() as isize;
+                    if start > length - 1 {
+                        return Ok(vec![]);
+                    }
+                    if end > length - 1 {
+                        end = length - 1;
+                    }
+                    let u_start = start as usize;
+                    let u_end = end as usize;
+                    return Ok(arr[u_start..u_end].to_vec())
+                }
+                _ => Err(invalid_data_err(
+                    "ERR LPUSH on key holding the wrong kind of value",
+                )),
+            },
+            None => Ok(vec![]),
+        }
+    }
+
     pub async fn xrange(
         &self,
         key: String,
