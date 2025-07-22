@@ -56,6 +56,10 @@ pub enum RespCommand {
         keys: Vec<String>,
         ids: Vec<String>,
     },
+    Rpush {
+        key: String, 
+        values: Vec<Vec<u8>>
+    }
 }
 
 impl std::fmt::Display for RespCommand {
@@ -122,6 +126,7 @@ impl Command {
                     "incr" => Ok(RespCommand::Incr(command.args[0].clone())),
                     "info" => Ok(RespCommand::Info(command.args[0].clone())),
                     "replconf" => parse_replconf(command),
+                    "rpush" => parse_rpush(command),
                     "psync" => parse_psync(command),
                     "wait" => Ok(RespCommand::Wait(
                         command.args[0].clone(),
@@ -139,6 +144,12 @@ impl Command {
             )),
         }
     }
+}
+
+fn parse_rpush(command: Command) -> io::Result<RespCommand> {
+    let key = command.args[0].clone();
+    let values = command.args.iter().skip(1).map(|s| s.as_bytes().to_vec()).collect::<Vec<Vec<u8>>>();
+    Ok(RespCommand::Rpush { key, values })
 }
 fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
     let (optional, rest) = {

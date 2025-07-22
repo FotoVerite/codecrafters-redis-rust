@@ -6,7 +6,9 @@ use tokio_util::codec::Framed;
 use crate::{
     command::{self, RespCommand},
     handlers::{
-        command_handlers::{config, psync, set, stream, type_command, wait, xadd, xrange},
+        command_handlers::{
+            config, list::{self, rpush}, psync, set, stream, type_command, wait, xadd, xrange,
+        },
         replication::handle_replconf_command,
         session::Session,
     },
@@ -137,7 +139,7 @@ async fn process_command(
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
-
+        RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
         RespCommand::Multi => {
             session.in_multi = true;
             Some(RespValue::SimpleString("OK".into()))

@@ -6,3 +6,4 @@ pub mod set;
 pub mod type_command;
 pub mod config;
 pub mod psync;
+pub mod list;

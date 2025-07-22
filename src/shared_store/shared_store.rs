@@ -14,6 +14,7 @@ use crate::shared_store::stream_id::StreamID;
 pub enum RedisValue {
     Text(Vec<u8>),
     Stream(Stream),
+    List(Vec<Vec<u8>>),
     #[allow(dead_code)]
     Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
@@ -63,6 +64,7 @@ impl Store {
     pub async fn get_type(&self, key: &str) -> io::Result<RespValue> {
         match self._get(key).await? {
             Some(redis_value) => match redis_value {
+                RedisValue::List(_) => Ok(RespValue::SimpleString("list".into())),
                 RedisValue::Stream(_) => Ok(RespValue::SimpleString("stream".into())),
                 RedisValue::Text(_) => Ok(RespValue::SimpleString("string".into())),
                 RedisValue::Queue(_) => Ok(RespValue::SimpleString("queue".into())),
@@ -176,6 +178,26 @@ impl Store {
 
         let entry = Entry::new(RedisValue::Text(value), expires_at);
         map.insert(key.to_string(), entry);
+    }
+
+    pub async fn rpush(&self, key: String, values: Vec<Vec<u8>>) -> io::Result<usize> {
+        let mut map = self.keyspace.write().await;
+        match map.get_mut(&key) {
+            Some(entry) => match &mut entry.value {
+                RedisValue::List(arr) => {
+                    arr.extend(values);
+                    Ok(arr.len())
+                }
+                _ => Err(invalid_data_err(
+                    "ERR RPUSH on key holding the wrong kind of value",
+                )),
+            },
+            None => {
+                let entry: Entry = Entry::new(RedisValue::List(values.clone()), None);
+                map.insert(key, entry);
+                Ok(values.iter().count().clone())
+            }
+        }
     }
 
     pub async fn xrange(
