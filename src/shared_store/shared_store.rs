@@ -200,7 +200,7 @@ impl Store {
         }
     }
 
-    pub async fn lpush(
+    pub async fn lrange(
         &self,
         key: String,
         start: isize,
@@ -213,7 +213,7 @@ impl Store {
         match map.get(&key) {
             Some(entry) => match &entry.value {
                 RedisValue::List(arr) => {
-                    let length = arr.iter().count() as isize;
+                    let length = arr.len() as isize;
                     if start > length - 1 {
                         return Ok(vec![]);
                     }
@@ -221,7 +221,7 @@ impl Store {
                         end = length - 1;
                     }
                     let u_start = start as usize;
-                    let u_end = end as usize;
+                    let u_end =( end + 1) as usize;
                     return Ok(arr[u_start..u_end].to_vec())
                 }
                 _ => Err(invalid_data_err(

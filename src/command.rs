@@ -60,7 +60,7 @@ pub enum RespCommand {
         key: String,
         values: Vec<Vec<u8>>,
     },
-    Lpush {
+    Lrange {
         key: String,
         start: isize,
         end: isize,
@@ -133,7 +133,7 @@ impl Command {
                     "replconf" => parse_replconf(command),
 
                     "rpush" => parse_rpush(command),
-                    "lpush" => parse_lpush(command),
+                    "lrange" => parse_lrange(command),
 
                     "psync" => parse_psync(command),
                     "wait" => Ok(RespCommand::Wait(
@@ -165,11 +165,11 @@ fn parse_rpush(command: Command) -> io::Result<RespCommand> {
     Ok(RespCommand::Rpush { key, values })
 }
 
-fn parse_lpush(command: Command) -> io::Result<RespCommand> {
+fn parse_lrange(command: Command) -> io::Result<RespCommand> {
     let key = command.args[0].clone();
     let start = command.args[1].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
     let end  = command.args[2].parse().map_err(|_| invalid_data_err("start does not exists are is not a number"))?;
-    Ok(RespCommand::Lpush {
+    Ok(RespCommand::Lrange {
         key, start, end
     })
 }
