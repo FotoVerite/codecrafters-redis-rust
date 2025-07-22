@@ -131,7 +131,7 @@ pub async fn xread_command(
     }
 
     // Get notifiers for the keys
-    let notifiers = store.get_notifiers(keys).await?;
+    let notifiers = store.get_notifiers(keys).await;
 
     // Decide whether to wait with timeout or wait forever
     match block {

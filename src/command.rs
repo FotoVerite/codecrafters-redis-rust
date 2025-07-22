@@ -70,6 +70,7 @@ pub enum RespCommand {
         values: Vec<Vec<u8>>,
     },
     Llen(String),
+    BLPop(Vec<String>, u64),
     Lpop(String, usize),
     Lpush {
         key: String,
@@ -148,6 +149,7 @@ impl Command {
                     "replconf" => parse_replconf(command),
                     "llen" => Ok(RespCommand::Llen(command.args[0].clone())),
                     "lpop" => parse_pop_command(command),
+                    "blpop" => parse_blpop_command(command),
                     "lpush" => parse_push_command(command, PushDirection::LPush),
                     "rpush" => parse_push_command(command, PushDirection::RPush),
                     "lrange" => parse_lrange(command),
@@ -180,6 +182,24 @@ fn parse_pop_command(command: Command) -> io::Result<RespCommand> {
         None => 1usize,
     };
     Ok(RespCommand::Lpop(key, arg))
+}
+
+fn parse_blpop_command(mut command: Command) -> io::Result<RespCommand> {
+    let timeout = match command.args.pop() {
+        None => return invalid_data("No timeout given"),
+        Some(arg) => arg
+            .parse::<f64>()
+            .map_err(|_| invalid_data_err("Unable to parse param"))?,
+    };
+    if timeout < 0f64 {
+        return invalid_data("Negative Time given");
+    }
+    let millis = if timeout > 0.0 {
+        (timeout * 1000.0).ceil() as u64
+    } else {
+        0
+    };
+    Ok(RespCommand::BLPop(command.args, millis))
 }
 fn parse_push_command(command: Command, lpush: PushDirection) -> io::Result<RespCommand> {
     let key = command.args[0].clone();

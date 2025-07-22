@@ -2,11 +2,12 @@ use futures::io;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::Instant;
 
 use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
+use crate::shared_store::redis_list::List;
 use crate::shared_store::redis_stream::{Stream, StreamEntries};
 use crate::shared_store::stream_id::StreamID;
 
@@ -14,7 +15,7 @@ use crate::shared_store::stream_id::StreamID;
 pub enum RedisValue {
     Text(Vec<u8>),
     Stream(Stream),
-    List(Vec<Vec<u8>>),
+    List(List),
     #[allow(dead_code)]
     Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
@@ -32,9 +33,11 @@ impl Entry {
 }
 type SharedStore = Arc<RwLock<HashMap<String, Entry>>>;
 type Log = Arc<RwLock<Vec<u8>>>;
-#[derive(Debug, Clone)]
+pub type NotifierStore = Mutex<HashMap<String, Arc<Notify>>>;
+#[derive(Debug)]
 pub struct Store {
     keyspace: SharedStore,
+    notifiers: NotifierStore,
     log: Log,
 }
 
@@ -42,6 +45,7 @@ impl Store {
     pub fn new() -> Self {
         Self {
             keyspace: Arc::new(RwLock::new(HashMap::new())),
+            notifiers: Mutex::new(HashMap::new()),
             log: Arc::new(RwLock::new(vec![])),
         }
     }
@@ -182,20 +186,23 @@ impl Store {
 
     pub async fn rpush(&self, key: String, values: Vec<Vec<u8>>) -> io::Result<usize> {
         let mut map = self.keyspace.write().await;
+        let len = values.len();
         match map.get_mut(&key) {
             Some(entry) => match &mut entry.value {
-                RedisValue::List(arr) => {
-                    arr.extend(values);
-                    Ok(arr.len())
-                }
+                RedisValue::List(list) => Ok(list.rpush(values)?),
                 _ => Err(invalid_data_err(
                     "ERR RPUSH on key holding the wrong kind of value",
                 )),
             },
             None => {
-                let entry: Entry = Entry::new(RedisValue::List(values.clone()), None);
-                map.insert(key, entry);
-                Ok(values.iter().count().clone())
+                let mut guard = self.notifiers.lock().await;
+                let notify = guard.entry(key.clone()).or_insert(Arc::new(Notify::new()));
+                let list = List::new(notify.clone(), values);
+                let entry = Entry::new(RedisValue::List(list), None);
+                map.insert(key.clone(), entry);
+                notify.notify_waiters();
+
+                Ok(len)
             }
         }
     }
@@ -204,51 +211,45 @@ impl Store {
         let mut map = self.keyspace.write().await;
         match map.get_mut(&key) {
             Some(entry) => match &mut entry.value {
-                RedisValue::List(arr) => {
-                  let value = arr.drain(..amount).collect();
-                  Ok(Some(value))
-                }
+                RedisValue::List(list) => Ok(list.lpop(amount)?),
                 _ => Err(invalid_data_err(
                     "ERR LPOP on key holding the wrong kind of value",
                 )),
             },
-            None => {
-               
-                Ok(None)
-            }
+            None => Ok(None),
         }
     }
 
     pub async fn lpush(&self, key: String, mut values: Vec<Vec<u8>>) -> io::Result<usize> {
         let mut map = self.keyspace.write().await;
+        let len = values.len();
         match map.get_mut(&key) {
             Some(entry) => match &mut entry.value {
-                RedisValue::List(arr) => {
-                    values.extend(arr.drain(..));
-                    *arr = values.clone();
-                    Ok(arr.len())
-                }
+                RedisValue::List(list) => Ok(list.lpush(values)?),
+
                 _ => Err(invalid_data_err(
                     "ERR LPUSH on key holding the wrong kind of value",
                 )),
             },
             None => {
-                let entry: Entry = Entry::new(RedisValue::List(values.clone()), None);
-                map.insert(key, entry);
-                Ok(values.iter().count().clone())
+                let mut guard = self.notifiers.lock().await;
+                let notify = guard.entry(key.clone()).or_insert(Arc::new(Notify::new()));
+                let list = List::new(notify.clone(), values);
+                let entry = Entry::new(RedisValue::List(list), None);
+                map.insert(key.clone(), entry);
+                notify.notify_waiters();
+
+                Ok(len)
             }
         }
     }
 
-     pub async fn llen(
-        &self,
-        key: String,
-    ) -> io::Result<usize> {
+    pub async fn llen(&self, key: String) -> io::Result<usize> {
         let map = self.keyspace.read().await;
         match map.get(&key) {
             Some(entry) => match &entry.value {
                 RedisValue::List(arr) => {
-                    let len = arr.len();
+                    let len = arr.entries.len();
                     return Ok(len);
                 }
                 _ => Err(invalid_data_err(
@@ -269,7 +270,7 @@ impl Store {
         match map.get(&key) {
             Some(entry) => match &entry.value {
                 RedisValue::List(arr) => {
-                    let len = arr.len() as isize;
+                    let len = arr.entries.len() as isize;
                     if start < 0 {
                         start += len;
                     }
@@ -286,7 +287,7 @@ impl Store {
 
                     let u_start = start as usize;
                     let u_end = (end + 1) as usize;
-                    return Ok(arr[u_start..u_end].to_vec());
+                    return Ok(arr.entries[u_start..u_end].to_vec());
                 }
                 _ => Err(invalid_data_err(
                     "ERR LPUSH on key holding the wrong kind of value",
@@ -354,22 +355,6 @@ impl Store {
         }
     }
 
-    pub async fn get_notifiers(&self, keys: &Vec<String>) -> io::Result<Vec<Arc<Notify>>> {
-        let map = self.keyspace.read().await;
-        let mut ret = Vec::with_capacity(keys.len());
-        for key in keys {
-            let entry = map
-                .get(key)
-                .ok_or_else(|| invalid_data_err(format!("Missing key: {}", key)))?;
-
-            match &entry.value {
-                RedisValue::Stream(stream) => ret.push(stream.notify.clone()),
-                _ => return invalid_data("Key is not for a stream"),
-            }
-        }
-        Ok(ret)
-    }
-
     pub async fn xadd(
         &self,
         key: &str,
@@ -394,7 +379,11 @@ impl Store {
             }
         } else {
             let stream_id: StreamID = StreamID::from_redis_input(None, id)?;
-            let mut stream = Stream::new();
+            let mut guard = self.notifiers.lock().await;
+            let notify = guard
+                .entry(key.to_string())
+                .or_insert(Arc::new(Notify::new()));
+            let mut stream = Stream::new(notify.clone());
             stream.append(stream_id.clone(), fields)?;
             let entry = Entry::new(RedisValue::Stream(stream), None);
             map.insert(key.to_string(), entry);
@@ -415,5 +404,15 @@ impl Store {
     pub async fn get_offset(&self) -> usize {
         let log = self.log.read().await;
         log.len()
+    }
+
+    pub async fn get_notifiers(&self, keys: &[String]) -> Vec<Arc<Notify>> {
+        let mut ret = Vec::with_capacity(keys.len());
+        let mut guard = self.notifiers.lock().await;
+        for key in keys {
+            let notify = guard.entry(key.clone()).or_insert(Arc::new(Notify::new()));
+            ret.push(notify.clone());
+        }
+        ret
     }
 }

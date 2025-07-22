@@ -141,6 +141,10 @@ async fn process_command(
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
+        RespCommand::BLPop(keys, timeout) => {
+            list::blpop::blpop_command(&store, &keys, timeout).await?
+        }
+
         RespCommand::Llen(key) => list::llen(store, key).await?,
         RespCommand::Lpop(key, amount) => list::lpop(store, key, amount).await?,
         RespCommand::Lpush { key, values } => list::lpush(store, key, values).await?,

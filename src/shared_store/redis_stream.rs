@@ -47,9 +47,9 @@ impl Stream {
         &StreamID { ms: 0, seq: 0 }
     }
 
-    pub fn new() -> Self {
+    pub fn new(notify: Arc<Notify>) -> Self {
         Self {
-            notify: Arc::new(Notify::new()),
+            notify: notify,
             entries: BTreeMap::new(),
         }
     }
