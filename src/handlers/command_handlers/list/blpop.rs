@@ -65,8 +65,9 @@ async fn wait_forever(
             _ = select_all(futures) => {
                 println!("Waiting Forever called.");
                 task::yield_now().await;
-                if let Some(resp) = try_poll_lpop(store, keys).await? {
-                    return Ok(Some(resp));
+                match try_poll_lpop(store, keys).await? {
+                    Some(resp) => return Ok(Some(resp)),  // Pop successful, respond
+                    None => continue,                     // No data, go back to waiting
                 }
             }
         }
