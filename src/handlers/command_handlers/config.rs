@@ -2,9 +2,7 @@
 use std::sync::Arc;
 
 use crate::{
-    command::ConfigCommand,
-    rdb::config::RdbConfig,
-    resp::RespValue,
+    command::ConfigCommand, rdb_parser::config::RdbConfig, resp::RespValue
 };
 
 pub fn config_command(command: ConfigCommand, rdb: Arc<RdbConfig>) -> RespValue {

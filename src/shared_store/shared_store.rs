@@ -1,7 +1,7 @@
 use futures::io;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::Instant;
 
@@ -179,7 +179,6 @@ impl Store {
     pub async fn set(&self, key: &str, value: Vec<u8>, px: Option<u64>) {
         let mut map = self.keyspace.write().await;
         let expires_at = px.map(|ms| Instant::now() + Duration::from_millis(ms));
-
         let entry = Entry::new(RedisValue::Text(value), expires_at);
         map.insert(key.to_string(), entry);
     }

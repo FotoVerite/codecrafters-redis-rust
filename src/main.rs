@@ -2,19 +2,28 @@ mod command;
 mod error_helpers;
 mod handlers;
 mod heartbeat;
-mod rdb;
+mod rdb_parser;
 mod replication_manager;
 mod resp;
 mod server_info;
 mod shared_store;
 
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
+use anyhow::Context;
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::codec::Framed;
 
 use crate::{
-    error_helpers::invalid_data_err, handlers::{master::handle_master_connection, replication::handle_replication_connection}, rdb::config::RdbConfig, replication_manager::manager::ReplicationManager, server_info::ServerInfo, shared_store::shared_store::Store
+    error_helpers::{invalid_data_err},
+    handlers::{master::handle_master_connection, replication::handle_replication_connection},
+    rdb_parser::{config::RdbConfig, length_encoded_values::LengthEncodedValue},
+    replication_manager::manager::ReplicationManager,
+    server_info::ServerInfo,
+    shared_store::shared_store::Store,
 };
 
 #[tokio::main]
@@ -32,8 +41,29 @@ async fn main() -> std::io::Result<()> {
     let replication_manager = Arc::new(Mutex::new(ReplicationManager::new()));
     {
         let database = rdb.load()?;
-        for (key, value, px) in database {
-            store.set(&key, value, px).await;
+        for (key, (value, _value_type, px)) in database.key_values {
+            let key = String::from_utf8(key).map_err(|_| invalid_data_err("Invalid Key"))?;
+            let value = match value {
+                LengthEncodedValue::Integer(int) => int.to_be_bytes().to_vec(),
+                LengthEncodedValue::String(value) => value,
+            };
+            let now_epoch_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            let expires_at = match px {
+                Some(epoch_ms) if epoch_ms <= now_epoch_ms as u64 => {
+                    continue; // Already expired, skip
+                }
+                Some(epoch_ms) => {
+                    let ttl = epoch_ms - now_epoch_ms as u64;
+                    Some(ttl)
+                }
+                None => None,
+            };
+
+            store.set(&key, value, expires_at).await;
         }
     }
     match server_info.role.to_ascii_lowercase().as_str() {
@@ -101,12 +131,8 @@ async fn main() -> std::io::Result<()> {
                 tokio::spawn(async move {
                     let mut framed = Framed::new(socket, resp::RespCodec);
 
-                    if let Err(e) = handle_replication_connection(
-                        &mut framed,
-                        store_clone,
-                        info_clone,
-                    )
-                    .await
+                    if let Err(e) =
+                        handle_replication_connection(&mut framed, store_clone, info_clone).await
                     {
                         eprintln!("Error handling {}: {:?}", addr, e);
                     }

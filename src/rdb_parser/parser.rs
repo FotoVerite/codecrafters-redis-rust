@@ -1,20 +1,29 @@
 use std::{
-    fs::File,
-    io::{self, BufRead, BufReader, Read},
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    collections::{HashMap, HashSet}, fs::File, io::{self, BufRead, BufReader, Read}, path::Path
 };
 
-use crate::rdb::{config::RdbConfig, length_encoded_values::LengthEncodedValue};
+use crate::rdb_parser::{
+    config::RdbConfig,
+    length_encoded_values::LengthEncodedValue,
+    optcode::{RdbOpcode, parse_opcode},
+};
+
+#[derive(Debug, Clone)]
+pub struct ReturnValue {
+    pub db_count: usize,
+    pub key_values: HashMap<Vec<u8>, (LengthEncodedValue, String, Option<u64>)>,
+}
 
 impl RdbConfig {
-    pub fn load(&self) -> Result<Vec<(String, Vec<u8>, Option<u64>)>, io::Error> {
-        let mut ret = vec![];
+    pub fn load(&self) -> io::Result<ReturnValue> {
         let path = Path::new(&self.dir).join(&self.dbfilename);
         if !path.exists() {
-            return Ok(vec![]);
+            return Ok(ReturnValue { db_count: 1, key_values: HashMap::new()});
         }
+        let mut dbs = HashSet::new();
+        let mut key_values = HashMap::new();
         let raw = std::fs::read(&path)?;
+
         eprintln!("--- full RDB dump ({} bytes) ---", raw.len());
         for (i, chunk) in raw.chunks(16).enumerate() {
             // print a hex offset
@@ -27,9 +36,11 @@ impl RdbConfig {
         eprintln!("--------------------------------");
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
+
         self.check_header(&mut reader)?;
         let _ = self.get_version(&mut reader)?;
         let mut expiry: Option<u64> = None;
+
         loop {
             let mut op = [0u8; 1];
             if let Err(e) = reader.read_exact(&mut op) {
@@ -40,70 +51,53 @@ impl RdbConfig {
                 }
             }
             let opcode = op[0];
-            match opcode {
-                0xFF => break,
-                0xFA => {
-                    // AUX field
-                    let _key = LengthEncodedValue::from_reader(&mut reader)?;
-                    let _value = LengthEncodedValue::from_reader(&mut reader)?;
-                    // maybe log or ignore these
+            let rdb_instruction = parse_opcode(opcode);
+            match rdb_instruction {
+                RdbOpcode::End => break,
+                RdbOpcode::SelectDb => {
+                    let db = LengthEncodedValue::parse_length_encoded_int(&mut reader)?;
+                    dbs.insert(db);
                 }
-                0xFE => {
-                    // SELECT DB opcode
-                    let _ = LengthEncodedValue::from_reader(&mut reader)?;
-                    // Optionally extract integer or string (it should be integer)
+                RdbOpcode::ResizeDb => {
+                    let _size = LengthEncodedValue::parse_length_encoded_int(&mut reader)?;
+                    let _expire = LengthEncodedValue::parse_length_encoded_int(&mut reader)?;
+                }
+                RdbOpcode::Aux => {
+                    let _key = LengthEncodedValue::parse_string(&mut reader)?;
+                    let _value = LengthEncodedValue::parse_value(&mut reader)?;
+                }
+                RdbOpcode::KeyValue(type_code) => {
+                    let key = LengthEncodedValue::parse_string(&mut reader)?;
+                    let value = LengthEncodedValue::parse_value(&mut reader)?;
+                    let value_type = match type_code {
+                        0x00 => "string",
+                        0x01 => "list",
+                        0x02 => "set",
+                        0x03 => "sorted_set",
+                        0x04 => "hash",
+                        0x0A => "ziplist",
+                        0x0B => "set",
+                        0x0D => "hash",
 
-                    // skip or store db_num
+                        _ => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                format!("invalid type {}", type_code),
+                            ));
+                        }
+                    };
+                    key_values.insert(key, (value, value_type.to_string(), expiry));
+                    expiry = None;
                 }
-                0xFD => {
-                    // EXPIRE: 4‑byte seconds (big endian)
+                RdbOpcode::ExpireTimeSec => {
                     let mut secs = [0u8; 4];
                     reader.read_exact(&mut secs)?;
-                    eprintln!("EXPIRETIME_SEC raw bytes: {:02X?}", secs); // Debug output
-
                     expiry = Some(u32::from_be_bytes(secs) as u64 * 1000);
-                    continue;
                 }
-                0xFC => {
-                    // PEXPIRE: 8‑byte milliseconds (big endian)
+                RdbOpcode::ExpireTimeMs => {
                     let mut ms = [0u8; 8];
                     reader.read_exact(&mut ms)?;
-                    eprintln!("EXPIRETIME_MS raw bytes: {:02X?}", ms); // Debug output
-
                     expiry = Some(u64::from_le_bytes(ms));
-                    continue;
-                }
-                0xFB => {
-                    let mut next_byte = [0u8; 2];
-                    reader.read_exact(&mut next_byte)?;
-                }
-
-                0x00 => {
-                    let key = {
-                        match self.decode_string(&mut reader)? {
-                            LengthEncodedValue::String(string) => string,
-                            LengthEncodedValue::Integer(integer) => integer.to_string(),
-                        }
-                    };
-                    let value = {
-                        match self.decode_string(&mut reader)? {
-                            LengthEncodedValue::String(string) => string.into_bytes(),
-                            LengthEncodedValue::Integer(integer) => {
-                                integer.to_string().into_bytes()
-                            }
-                        }
-                    };
-                    eprintln!("key: {:?}", key);
-                    eprintln!("expiry: {:?}", expiry);
-
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_millis() as u64;
-                    if (expiry.is_some() && now < expiry.unwrap() )|| expiry.is_none() {
-                        ret.push((key, value, expiry));
-                    }
-                    expiry = None;
                 }
                 _ => {
                     return Err(io::Error::new(
@@ -116,13 +110,19 @@ impl RdbConfig {
                 }
             }
         }
-        Ok(ret)
+
+    
+
+        Ok(ReturnValue {
+            db_count: dbs.len(),
+            key_values,
+        })
     }
 
     fn check_header(&self, reader: &mut BufReader<File>) -> Result<(), io::Error> {
         let mut buffer = [0u8; 5];
         reader.read_exact(&mut buffer)?;
-        if buffer != "REDIS".as_bytes() {
+        if buffer != "REDIS".as_bytes() && buffer != "mySQL".as_bytes() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid Database",
@@ -142,10 +142,6 @@ impl RdbConfig {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid version number"))?;
         Ok(version)
     }
-
-    fn decode_string(&self, reader: &mut BufReader<File>) -> Result<LengthEncodedValue, io::Error> {
-        LengthEncodedValue::from_reader(reader)
-    }
 }
 
 fn _peek_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) -> std::io::Result<()> {
@@ -163,3 +159,4 @@ fn _consume_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) {
     // After you're sure you want to move the cursor forward:
     reader.consume(n);
 }
+
