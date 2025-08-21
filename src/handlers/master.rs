@@ -1,10 +1,17 @@
 use futures::{SinkExt, StreamExt};
-use std::sync::Arc;
-use tokio::{net::TcpStream, sync::Mutex};
-use tokio_util::codec::Framed;
+use std::{os::unix::net::SocketAddr, sync::Arc};
+use tokio::{
+    net::TcpStream,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Mutex,
+    },
+};
+use tokio_util::codec::{Framed, FramedWrite};
 
 use crate::{
-    command::{self, RespCommand}, handlers::{
+    command::{self, RespCommand},
+    handlers::{
         command_handlers::{
             config,
             list::{self, rpush},
@@ -12,7 +19,12 @@ use crate::{
         },
         replication::handle_replconf_command,
         session::Session,
-    }, rdb_parser::config::RdbConfig, replication_manager::manager::ReplicationManager, resp::{RespCodec, RespValue}, server_info::ServerInfo, shared_store::shared_store::Store
+    },
+    rdb_parser::config::RdbConfig,
+    replication_manager::manager::ReplicationManager,
+    resp::{RespCodec, RespValue},
+    server_info::ServerInfo,
+    shared_store::shared_store::Store,
 };
 
 pub struct _CommandContext {
@@ -33,12 +45,13 @@ pub async fn handle_master_connection(
     let mut session = Session::new();
     let mut framed = Framed::new(socket, RespCodec);
     let mut peer_addr = None;
+
     while let Some(result) = framed.next().await {
         let (resp_value, bytes) = result?;
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
         if let RespCommand::PSYNC(string, pos) = command.clone() {
-            if let Some(peer_addr) = peer_addr {
+            if let Some(peer_addr) = peer_addr.clone() {
                 psync::psync_command(
                     framed,
                     string,
@@ -50,6 +63,11 @@ pub async fn handle_master_connection(
                 .await?;
                 break; // End the loop for this connection
             }
+        }
+
+        if let RespCommand::Subscribe(channel_name) = command.clone() {
+            subscribe(framed, store, channel_name).await?;
+            break;
         }
         if session.in_multi {
             match command {
@@ -154,6 +172,7 @@ async fn process_command(
         RespCommand::Set { key, value, px } => {
             set::set_command(&store, &manager, key, &value, px, bytes).await?
         }
+
         RespCommand::Type(key) => type_command::type_command(&store, key).await?,
         RespCommand::ConfigCommand(command) => Some(config::config_command(command, rdb.clone())),
         RespCommand::Keys(string) => Some(super::keys::keys_command(string, store.clone()).await),
@@ -184,4 +203,25 @@ async fn process_command(
     };
 
     Ok(response_value)
+}
+
+async fn subscribe(
+    mut framed: Framed<TcpStream, RespCodec>,
+    store: Arc<Store>,
+    channel_name: String,
+) -> anyhow::Result<()> {
+    let addr = framed.get_ref().peer_addr()?;
+    let (tx, mut rx) = mpsc::channel(1024);
+    store.subscribe(channel_name.clone(), addr, tx).await;
+    let mut response = vec![];
+    response.push(RespValue::BulkString(Some("subscribe".into())));
+    response.push(RespValue::BulkString(Some(channel_name.into())));
+    response.push(RespValue::Integer(1));
+    if let Err(_) = framed.send(RespValue::Array(response)).await {
+        return Ok(()); // client disconnected immediately
+    }
+    while let Some(message) = rx.recv().await {
+        framed.send(message).await?;
+    }
+    Ok(())
 }

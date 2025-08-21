@@ -7,6 +7,7 @@ use tokio::time::Instant;
 
 use crate::error_helpers::{invalid_data, invalid_data_err};
 use crate::resp::RespValue;
+use crate::shared_store::channel::Channel;
 use crate::shared_store::redis_list::List;
 use crate::shared_store::redis_stream::{Stream, StreamEntries};
 use crate::shared_store::stream_id::StreamID;
@@ -16,13 +17,14 @@ pub enum RedisValue {
     Text(Vec<u8>),
     Stream(Stream),
     List(List),
+    Channel(Channel),
     #[allow(dead_code)]
     Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
 
 #[derive(Debug, Clone)]
 pub struct Entry {
-    value: RedisValue,
+    pub(crate) value: RedisValue,
     expires_at: Option<Instant>,
 }
 
@@ -36,7 +38,7 @@ type Log = Arc<RwLock<Vec<u8>>>;
 pub type NotifierStore = Mutex<HashMap<String, Arc<Notify>>>;
 #[derive(Debug)]
 pub struct Store {
-    keyspace: SharedStore,
+    pub(crate) keyspace: SharedStore,
     notifiers: NotifierStore,
     log: Log,
 }
@@ -68,6 +70,7 @@ impl Store {
     pub async fn get_type(&self, key: &str) -> io::Result<RespValue> {
         match self._get(key).await? {
             Some(redis_value) => match redis_value {
+                RedisValue::Channel(_) => Ok(RespValue::SimpleString("channel".into())),
                 RedisValue::List(_) => Ok(RespValue::SimpleString("list".into())),
                 RedisValue::Stream(_) => Ok(RespValue::SimpleString("stream".into())),
                 RedisValue::Text(_) => Ok(RespValue::SimpleString("string".into())),
@@ -78,6 +81,22 @@ impl Store {
     }
 
     async fn _get(&self, key: &str) -> io::Result<Option<RedisValue>> {
+        let value = {
+            let map = self.keyspace.read().await;
+            let entry = map.get(key).cloned();
+            if let Some(entry) = entry {
+                match entry.expires_at {
+                    Some(expiry) if Instant::now() >= expiry => None,
+                    _ => Some(entry.value),
+                }
+            } else {
+                None
+            }
+        };
+        Ok(value)
+    }
+
+    async fn _get_mut(&self, key: &str) -> io::Result<Option<RedisValue>> {
         let value = {
             let map = self.keyspace.read().await;
             let entry = map.get(key).cloned();

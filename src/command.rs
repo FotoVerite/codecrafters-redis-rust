@@ -46,6 +46,7 @@ pub enum RespCommand {
         value: Vec<u8>,
         px: Option<u64>,
     },
+    Subscribe(String),
     Type(String),
     Wait(String, String),
     Xadd {
@@ -134,6 +135,7 @@ impl Command {
             RespValue::Array(a) => {
                 let command = Command::new(a)?;
                 match command.name.to_ascii_lowercase().as_str() {
+                    "subscribe" => Ok(RespCommand::Subscribe(command.args[0].clone())),
                     "multi" => Ok(RespCommand::Multi),
                     "discard" => Ok(RespCommand::Discard),
                     "exec" => Ok(RespCommand::Exec),
