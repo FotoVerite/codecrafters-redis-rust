@@ -1,7 +1,8 @@
 pub mod command_handlers;
-pub mod master;
-pub mod replication;
 pub mod info;
 pub mod keys;
+pub mod master;
+pub mod replication;
+pub mod session;
+pub mod slave;
 pub mod utils;
-mod session;

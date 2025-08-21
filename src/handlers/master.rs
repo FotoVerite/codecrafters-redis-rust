@@ -1,5 +1,5 @@
 use futures::{SinkExt, StreamExt};
-use std::{os::unix::net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpStream,
     sync::{
@@ -210,18 +210,48 @@ async fn subscribe(
     store: Arc<Store>,
     channel_name: String,
 ) -> anyhow::Result<()> {
+    let mut channels = vec![];
+    channels.push(channel_name.clone());
     let addr = framed.get_ref().peer_addr()?;
     let (tx, mut rx) = mpsc::channel(1024);
+    let response =
+        subscribe_to_channel(store.clone(), channel_name, &mut channels, addr, tx.clone()).await;
+    if let Err(_) = framed.send(RespValue::Array(response)).await {
+        return Ok(()); // client disconnected immediately
+    }
+    loop {
+        tokio::select! {
+               Some(msg) = rx.recv() => {
+                   // send pub/sub message to client
+                   framed.send(msg).await?;
+               },
+               Some(Ok((resp_value, _bytes))) = framed.next() => {
+               if let Ok(command) = command::Command::try_from_resp(resp_value) {
+                   if let command::RespCommand::Subscribe(new_channel) = command {
+                       channels.push(new_channel.clone());
+                       let response = subscribe_to_channel(store.clone(), new_channel, &mut channels, addr, tx.clone()).await;
+                       framed.send(RespValue::Array(response)).await?;
+                   }
+               }
+           },
+           else => break,
+        // both streams closed
+           }
+    }
+    Ok(())
+}
+
+async fn subscribe_to_channel(
+    store: Arc<Store>,
+    channel_name: String,
+    channels: &mut Vec<String>,
+    addr: SocketAddr,
+    tx: Sender<RespValue>,
+) -> Vec<RespValue> {
     store.subscribe(channel_name.clone(), addr, tx).await;
     let mut response = vec![];
     response.push(RespValue::BulkString(Some("subscribe".into())));
     response.push(RespValue::BulkString(Some(channel_name.into())));
-    response.push(RespValue::Integer(1));
-    if let Err(_) = framed.send(RespValue::Array(response)).await {
-        return Ok(()); // client disconnected immediately
-    }
-    while let Some(message) = rx.recv().await {
-        framed.send(message).await?;
-    }
-    Ok(())
+    response.push(RespValue::Integer(channels.len() as i64));
+    response
 }
