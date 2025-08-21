@@ -41,6 +41,19 @@ pub async fn handle_master_connection(
         let (resp_value, bytes) = result?;
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
+        if let RespCommand::PSYNC(string, pos) = command.clone() {
+            psync::psync_command(
+                client.framed,
+                string,
+                pos,
+                info.clone(),
+                manager.clone(),
+                client.addr.to_string(),
+            )
+            .await?;
+            break; // End the loop for this connection
+        }
+
         match client.mode {
             ClientMode::Normal => {
                 handle_normal_mode(
@@ -79,7 +92,7 @@ pub async fn handle_master_connection(
 
 async fn handle_normal_mode(
     client: &mut Client,
-    session: &mut Session,
+    _session: &mut Session,
     command: RespCommand,
     bytes: Vec<u8>,
     store: Arc<Store>,
