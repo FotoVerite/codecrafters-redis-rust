@@ -16,6 +16,7 @@ pub enum ReplconfCommand {
     Ack(String),
 }
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum PushDirection {
     LPush,
     RPush,

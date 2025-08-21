@@ -6,7 +6,7 @@ pub enum RdbOpcode {
     ExpireTimeSec,
     KeyValue(u8), // generic, maybe further specify by type
     End,
-    Unknown(u8),
+    Unknown,
 }
 
 pub fn parse_opcode(opcode: u8) -> RdbOpcode {
@@ -19,7 +19,7 @@ pub fn parse_opcode(opcode: u8) -> RdbOpcode {
         0xFD => RdbOpcode::ExpireTimeSec,
         0xFE => RdbOpcode::SelectDb,
         0xFF => RdbOpcode::End,
-        other => RdbOpcode::Unknown(other),
+        _ => RdbOpcode::Unknown,
     }
 }
 

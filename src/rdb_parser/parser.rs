@@ -10,6 +10,7 @@ use crate::rdb_parser::{
 
 #[derive(Debug, Clone)]
 pub struct ReturnValue {
+    #[allow(dead_code)]
     pub db_count: usize,
     pub key_values: HashMap<Vec<u8>, (LengthEncodedValue, String, Option<u64>)>,
 }

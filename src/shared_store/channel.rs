@@ -6,6 +6,7 @@ use crate::{resp::RespValue, shared_store::shared_store::{Entry, RedisValue, Sto
 
 #[derive(Debug, Clone)]
 pub struct Channel {
+    #[allow(dead_code)]
     name: String,
     pub clients: HashMap<SocketAddr, Sender<RespValue>>,
 }

@@ -3,18 +3,18 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpStream,
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Sender},
         Mutex,
     },
 };
-use tokio_util::codec::{Framed, FramedWrite};
+use tokio_util::codec::Framed;
 
 use crate::{
     command::{self, RespCommand},
     handlers::{
         command_handlers::{
             config,
-            list::{self, rpush},
+            list::{self},
             psync, set, stream, type_command, wait, xadd, xrange,
         },
         replication::handle_replconf_command,

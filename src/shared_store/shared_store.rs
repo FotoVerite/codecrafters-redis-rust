@@ -1,7 +1,7 @@
 use futures::io;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::Instant;
 
@@ -238,7 +238,7 @@ impl Store {
         }
     }
 
-    pub async fn lpush(&self, key: String, mut values: Vec<Vec<u8>>) -> io::Result<usize> {
+    pub async fn lpush(&self, key: String, values: Vec<Vec<u8>>) -> io::Result<usize> {
         let mut map = self.keyspace.write().await;
         let len = values.len();
         match map.get_mut(&key) {

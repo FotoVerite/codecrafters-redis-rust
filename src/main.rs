@@ -13,7 +13,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tokio::{net::TcpListener, sync::Mutex};
 use tokio_util::codec::Framed;
 

@@ -25,6 +25,7 @@ pub enum ValueEncoding {
     Int8,
     Int16,
     Int32,
+    #[allow(dead_code)]
     CompressedString {
         compressed_len: usize,
         original_len: usize,
@@ -37,12 +38,12 @@ impl LengthEncodedValue {
         match length {
             ValueEncoding::String(size) => {
                 let mut value = vec![0u8; size];
-                reader.read_exact(&mut value);
+                let _ = reader.read_exact(&mut value);
                 Ok(LengthEncodedValue::String(value))
             }
             ValueEncoding::Int8 => {
                 let mut value = vec![0u8; 1];
-                reader.read_exact(&mut value);
+                let _ = reader.read_exact(&mut value);
                 Ok(LengthEncodedValue::Integer(value[0] as u64))
             }
             ValueEncoding::Int16 => {
