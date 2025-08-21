@@ -7,11 +7,11 @@ use tokio::{
         Mutex,
     },
 };
-use tokio_util::codec::Framed;
 
 use crate::{
     command::{self, RespCommand},
     handlers::{
+        client::{Client, ClientMode},
         command_handlers::{
             config,
             list::{self},
@@ -22,18 +22,10 @@ use crate::{
     },
     rdb_parser::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
-    resp::{RespCodec, RespValue},
+    resp::{RespValue},
     server_info::ServerInfo,
     shared_store::shared_store::Store,
 };
-
-pub struct _CommandContext {
-    pub store: Arc<Store>,
-    pub rdb: Arc<RdbConfig>,
-    pub manager: Arc<Mutex<ReplicationManager>>,
-    pub info: Arc<ServerInfo>,
-    pub session: Session,
-}
 
 pub async fn handle_master_connection(
     socket: TcpStream,
@@ -42,99 +34,156 @@ pub async fn handle_master_connection(
     manager: Arc<Mutex<ReplicationManager>>,
     info: Arc<ServerInfo>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = Client::new(socket);
     let mut session = Session::new();
-    let mut framed = Framed::new(socket, RespCodec);
-    let mut peer_addr = None;
 
-    while let Some(result) = framed.next().await {
+    while let Some(result) = client.framed.next().await {
         let (resp_value, bytes) = result?;
         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
-        if let RespCommand::PSYNC(string, pos) = command.clone() {
-            if let Some(peer_addr) = peer_addr.clone() {
-                psync::psync_command(
-                    framed,
-                    string,
-                    pos,
-                    info.clone(),
+        match client.mode {
+            ClientMode::Normal => {
+                handle_normal_mode(
+                    &mut client,
+                    &mut session,
+                    command,
+                    bytes,
+                    store.clone(),
+                    rdb.clone(),
                     manager.clone(),
-                    peer_addr,
+                    info.clone(),
                 )
                 .await?;
-                break; // End the loop for this connection
             }
-        }
-
-        if let RespCommand::Subscribe(channel_name) = command.clone() {
-            subscribe(framed, store, channel_name).await?;
-            break;
-        }
-        if session.in_multi {
-            match command {
-                RespCommand::Exec => {
-                    session.in_multi = false;
-                    if session.queued.is_empty() {
-                        framed.send(RespValue::Array(vec![])).await?;
-                        continue;
-                    }
-                    let mut responses = Vec::new();
-                    let queue = &session.queued.clone();
-                    for (queued_command, bytes) in queue {
-                        let response = process_command(
-                            store.clone(),
-                            rdb.clone(),
-                            manager.clone(),
-                            info.clone(),
-                            &mut session,
-                            queued_command.clone(),
-                            bytes.clone(),
-                            &mut peer_addr,
-                        )
-                        .await?;
-
-                        if let Some(resp) = response {
-                            responses.push(resp);
-                        } else {
-                        }
-                    }
-
-                    framed.send(RespValue::Array(responses)).await?;
-                    session.queued.clear();
-                }
-                RespCommand::Discard => {
-                    framed.send(RespValue::SimpleString("OK".into())).await?;
-
-                    session.queued.clear();
-                    session.in_multi = false;
-                }
-                _ => {
-                    session.queued.push((command, bytes));
-                    framed
-                        .send(RespValue::BulkString(Some("QUEUED".into())))
-                        .await?;
-                }
+            ClientMode::Subscribed => {
+                handle_subscribed_mode(&mut client, command, store.clone()).await?;
             }
-            continue;
-        }
-        let response_value = process_command(
-            store.clone(),
-            rdb.clone(),
-            manager.clone(),
-            info.clone(),
-            &mut session,
-            command,
-            bytes,
-            &mut peer_addr,
-        )
-        .await?;
-
-        println!("Sending: {:?}", &response_value);
-
-        if let Some(value) = response_value {
-            framed.send(value).await?;
+            ClientMode::Multi => {
+                handle_multi_mode(
+                    &mut client,
+                    &mut session,
+                    command,
+                    bytes,
+                    store.clone(),
+                    rdb.clone(),
+                    manager.clone(),
+                    info.clone(),
+                )
+                .await?;
+            }
         }
     }
 
+    Ok(())
+}
+
+async fn handle_normal_mode(
+    client: &mut Client,
+    session: &mut Session,
+    command: RespCommand,
+    bytes: Vec<u8>,
+    store: Arc<Store>,
+    rdb: Arc<RdbConfig>,
+    manager: Arc<Mutex<ReplicationManager>>,
+    info: Arc<ServerInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        RespCommand::Subscribe(channel_name) => {
+            client.mode = ClientMode::Subscribed;
+            subscribe(client, store, channel_name).await?;
+        }
+        RespCommand::Multi => {
+            client.mode = ClientMode::Multi;
+            client.framed.send(RespValue::SimpleString("OK".into())).await?;
+        }
+        _ => {
+            let response = process_command(
+                store,
+                rdb,
+                manager,
+                info,
+                command,
+                bytes,
+                &mut Some(client.addr.to_string()),
+            )
+            .await?;
+            if let Some(response) = response {
+                client.framed.send(response).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_subscribed_mode(
+    client: &mut Client,
+    command: RespCommand,
+    store: Arc<Store>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        RespCommand::Subscribe(channel_name) => {
+            subscribe(client, store, channel_name).await?;
+        }
+        _ => {
+            let error_message = format!(
+                "ERR Can't execute '{:?}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+                command
+            );
+            client.framed.send(RespValue::Error(error_message)).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_multi_mode(
+    client: &mut Client,
+    session: &mut Session,
+    command: RespCommand,
+    bytes: Vec<u8>,
+    store: Arc<Store>,
+    rdb: Arc<RdbConfig>,
+    manager: Arc<Mutex<ReplicationManager>>,
+    info: Arc<ServerInfo>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        RespCommand::Exec => {
+            client.mode = ClientMode::Normal;
+            if session.queued.is_empty() {
+                client.framed.send(RespValue::Array(vec![])).await?;
+                return Ok(());
+            }
+            let mut responses = Vec::new();
+            let queue = &session.queued.clone();
+            for (queued_command, bytes) in queue {
+                let response = process_command(
+                    store.clone(),
+                    rdb.clone(),
+                    manager.clone(),
+                    info.clone(),
+                    queued_command.clone(),
+                    bytes.clone(),
+                    &mut Some(client.addr.to_string()),
+                )
+                .await?;
+
+                if let Some(resp) = response {
+                    responses.push(resp);
+                }
+            }
+
+            client.framed.send(RespValue::Array(responses)).await?;
+            session.queued.clear();
+        }
+        RespCommand::Discard => {
+            client.mode = ClientMode::Normal;
+            client.framed.send(RespValue::SimpleString("OK".into())).await?;
+            session.queued.clear();
+        }
+        _ => {
+            session.queued.push((command, bytes));
+            client.framed.send(RespValue::BulkString(Some("QUEUED".into()))).await?;
+        }
+    }
     Ok(())
 }
 
@@ -143,7 +192,6 @@ async fn process_command(
     rdb: Arc<RdbConfig>,
     manager: Arc<Mutex<ReplicationManager>>,
     info: Arc<ServerInfo>,
-    session: &mut Session,
     command: RespCommand,
     bytes: Vec<u8>,
     peer_addr: &mut Option<String>,
@@ -163,10 +211,7 @@ async fn process_command(
         RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
         RespCommand::Lrange { key, start, end } => list::lrange(store, key, start, end).await?,
 
-        RespCommand::Multi => {
-            session.in_multi = true;
-            Some(RespValue::SimpleString("OK".into()))
-        }
+        RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
         RespCommand::Incr(key) => store.incr(&key).await?,
         RespCommand::Get(key) => Some(store.get(&key).await?),
         RespCommand::Set { key, value, px } => {
@@ -178,7 +223,10 @@ async fn process_command(
         RespCommand::Keys(string) => Some(super::keys::keys_command(string, store.clone()).await),
         RespCommand::Info(string) => Some(super::info::info_command(string, info.clone())),
         RespCommand::ReplconfCommand(command) => {
-            Some(handle_replconf_command(command, info.clone(), peer_addr))
+            let mut p_addr = peer_addr.clone();
+            let ret = handle_replconf_command(command, info.clone(), &mut p_addr);
+            *peer_addr = p_addr;
+            Some(ret)
         }
         RespCommand::RDB(_) => None,
         RespCommand::Wait(required_replicas, timeout_ms) => {
@@ -206,31 +254,31 @@ async fn process_command(
 }
 
 async fn subscribe(
-    mut framed: Framed<TcpStream, RespCodec>,
+    client: &mut Client,
     store: Arc<Store>,
     channel_name: String,
 ) -> anyhow::Result<()> {
     let mut channels = vec![];
     channels.push(channel_name.clone());
-    let addr = framed.get_ref().peer_addr()?;
+    let addr = client.addr;
     let (tx, mut rx) = mpsc::channel(1024);
     let response =
         subscribe_to_channel(store.clone(), channel_name, &mut channels, addr, tx.clone()).await;
-    if let Err(_) = framed.send(RespValue::Array(response)).await {
+    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
         return Ok(()); // client disconnected immediately
     }
     loop {
         tokio::select! {
                Some(msg) = rx.recv() => {
                    // send pub/sub message to client
-                   framed.send(msg).await?;
+                   client.framed.send(msg).await?;
                },
-               Some(Ok((resp_value, _bytes))) = framed.next() => {
+               Some(Ok((resp_value, _bytes))) = client.framed.next() => {
                if let Ok(command) = command::Command::try_from_resp(resp_value) {
                    if let command::RespCommand::Subscribe(new_channel) = command {
                        channels.push(new_channel.clone());
                        let response = subscribe_to_channel(store.clone(), new_channel, &mut channels, addr, tx.clone()).await;
-                       framed.send(RespValue::Array(response)).await?;
+                       client.framed.send(RespValue::Array(response)).await?;
                    }
                }
            },

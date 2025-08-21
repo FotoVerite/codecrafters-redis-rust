@@ -6,3 +6,4 @@ pub mod replication;
 pub mod session;
 pub mod slave;
 pub mod utils;
+pub mod client;
