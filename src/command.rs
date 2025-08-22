@@ -93,6 +93,7 @@ pub enum RespCommand {
     Zadd(String, f64, String),
     Zcard(String),
     Zrange(String, i64, i64),
+    Zrank(String, String),
 }
 
 use std::fmt;
@@ -192,8 +193,9 @@ impl Command {
                     "xread" => parse_xread(command),
                     "unsubscribe" => Ok(RespCommand::Unsubscribe(command.args[0].clone())),
                     "zadd" => parse_zadd(command),
-                    "zcard" =>Ok(RespCommand::Zcard(command.args[0].clone())),
+                    "zcard" => Ok(RespCommand::Zcard(command.args[0].clone())),
                     "zrange" => parse_zrange(command),
+                    "zrank" => parse_zrank(command),
 
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
@@ -226,6 +228,16 @@ fn parse_zadd(command: Command) -> io::Result<RespCommand> {
         .parse::<f64>()
         .map_err(|_| invalid_data_err("Unable to parse param"))?;
     Ok(RespCommand::Zadd(key, rank, command.args[2].clone()))
+}
+
+fn parse_zrank(command: Command) -> io::Result<RespCommand> {
+    if command.args.len() != 2 {
+        return Err(invalid_data_err("Unable to parse args"));
+    }
+    let key = command.args[0].clone();
+    let rank = command.args[1].clone();
+
+    Ok(RespCommand::Zrank(key, rank))
 }
 
 fn parse_zrange(command: Command) -> io::Result<RespCommand> {

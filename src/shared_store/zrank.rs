@@ -1,21 +1,12 @@
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    net::SocketAddr,
-};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use ordered_float::OrderedFloat;
 
-use crate::{
-    resp::RespValue,
-    shared_store::{
-        shared_store::{Entry, RedisValue, Store},
-        zrank,
-    },
-};
+use crate::shared_store::shared_store::{Entry, RedisValue, Store};
 
 #[derive(Debug, Clone)]
 pub struct Zrank {
-    data: BTreeMap<OrderedFloat<f64>, HashSet<String>>,
+    data: BTreeMap<OrderedFloat<f64>, BTreeSet<String>>,
     pub(crate) reverse_map: HashMap<String, f64>,
 }
 
@@ -59,7 +50,7 @@ impl Store {
         } else {
             let mut zrank = Zrank::new();
             zrank.reverse_map.insert(value.clone(), rank);
-            let mut set = HashSet::new();
+            let mut set = BTreeSet::new();
             set.insert(value);
             zrank.data.insert(OrderedFloat(rank), set);
             let entry: Entry = Entry::new(RedisValue::ZRank(zrank), None);
@@ -68,14 +59,31 @@ impl Store {
         }
     }
 
-    pub async fn zrank_command(&self, key: String, rank: f64) -> anyhow::Result<Option<usize>> {
-        let mut keyspace = self.keyspace.read().await;
+    pub async fn zrank_command(&self, key: String, value: String) -> anyhow::Result<Option<usize>> {
+        let keyspace = self.keyspace.read().await;
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {
                 RedisValue::ZRank(zrank) => {
-                    if let Some(data) = zrank.data.get(&OrderedFloat(rank)) {
-                        return Ok(Some(data.len()));
-                    };
+                    if !zrank.reverse_map.contains_key(&value) {
+                        return Ok(None);
+                    }
+                    let target_score = *zrank.reverse_map.get(&value).unwrap();
+                    let mut rank = 0;
+                    for (r, values) in zrank.data.iter() {
+                        if r != &OrderedFloat(target_score) {
+                            rank += values.len();
+                        } else {
+                            let mut sorted_members: Vec<_> = values.iter().collect();
+                            sorted_members.sort(); // lexicographical
+                            for m in sorted_members {
+                                if m == &value {
+                                    return Ok(Some(rank)); // found the rank
+                                }
+                                rank += 1;
+                            }
+                        }
+                    }
+
                     return Ok(None);
                 }
                 _ => return Ok(None),
@@ -84,12 +92,7 @@ impl Store {
         Ok(None)
     }
 
-    pub async fn zrange(
-        &self,
-        key: String,
-        start: i64,
-        stop: i64,
-    ) -> anyhow::Result<Vec<String>> {
+    pub async fn zrange(&self, key: String, start: i64, stop: i64) -> anyhow::Result<Vec<String>> {
         let mut keyspace = self.keyspace.read().await;
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {

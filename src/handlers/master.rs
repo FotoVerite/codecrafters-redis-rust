@@ -151,7 +151,6 @@ async fn handle_subscribed_mode(
         RespCommand::Unsubscribe(channel_name) => {
             // TODO: Implement unsubscribe logic
             unsubscribe_from_channel(store, channel_name, client).await?;
-
         }
         RespCommand::PSubscribe => {
             // TODO: Implement psubscribe logic
@@ -259,9 +258,9 @@ async fn process_command(
     let response_value = match command {
         RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
         RespCommand::Publish(channel, msg) => {
-            let amount =store.send_to_channel(channel, msg).await?;
+            let amount = store.send_to_channel(channel, msg).await?;
             Some(RespValue::Integer(amount as i64))
-        },
+        }
 
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
@@ -275,22 +274,35 @@ async fn process_command(
         RespCommand::Lpush { key, values } => list::lpush(store, key, values).await?,
         RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
         RespCommand::Lrange { key, start, end } => list::lrange(store, key, start, end).await?,
-        
-        RespCommand::Zadd(key,rank,value ) => {
+
+        RespCommand::Zadd(key, rank, value) => {
             let result = store.zadd(key, rank, value).await?;
             Some(RespValue::Integer(result))
         }
-         RespCommand::Zcard(key) => {
+        RespCommand::Zcard(key) => {
             let result = store.zcard(key).await?;
             Some(RespValue::Integer(result))
         }
-         RespCommand::Zrange(key,start,stop ) => {
+        RespCommand::Zrange(key, start, stop) => {
             let result = store.zrange(key, start, stop).await?;
             let mut response = vec![];
             for ret in result {
                 response.push(RespValue::BulkString(Some(ret.into())))
             }
-            Some(RespValue::Array(response))
+            if response.is_empty() {
+                Some(RespValue::BulkString(None))
+            } else {
+                Some(RespValue::Array(response))
+            }
+        }
+        RespCommand::Zrank(key, value) => {
+            let result = store.zrank_command(key, value).await?;
+            if let Some(result) = result {
+                Some(RespValue::Integer(result as i64))
+            }
+            else {
+                Some(RespValue::BulkString(None))
+            }
         }
 
         RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
@@ -384,9 +396,7 @@ async fn unsubscribe_from_channel(
     channel_name: String,
     client: &mut Client,
 ) -> anyhow::Result<()> {
-    _= store
-        .unsubscribe(channel_name.clone(), client.addr)
-        .await;
+    _ = store.unsubscribe(channel_name.clone(), client.addr).await;
     client.channels.pop();
     let mut response = vec![];
     response.push(RespValue::BulkString(Some("unsubscribe".into())));
