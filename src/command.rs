@@ -38,7 +38,7 @@ pub enum RespCommand {
     Exec,
     Discard,
     Ping,
-    Publish(String),
+    Publish(String, String),
     PSYNC(String, i64),
     #[allow(dead_code)]
     RDB(Option<Vec<u8>>),
@@ -107,7 +107,6 @@ impl fmt::Display for RespCommand {
     }
 }
 
-
 impl RespCommand {
     pub fn _to_resp(self) -> RespValue {
         match self {
@@ -158,6 +157,11 @@ impl Command {
                     "discard" => Ok(RespCommand::Discard),
                     "exec" => Ok(RespCommand::Exec),
                     "ping" => Ok(RespCommand::Ping),
+                    "publish" => Ok(RespCommand::Publish(
+                        command.args[0].clone(),
+                        command.args[1].clone(),
+                    )),
+
                     "echo" => Ok(RespCommand::Echo(command.args[0].clone())),
                     "get" => Ok(RespCommand::Get(command.args[0].clone())),
                     "set" => parse_set(command),

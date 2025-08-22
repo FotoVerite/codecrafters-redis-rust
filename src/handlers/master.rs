@@ -146,10 +146,7 @@ async fn handle_subscribed_mode(
             response.push(RespValue::BulkString(Some("pong".into())));
             response.push(RespValue::BulkString(Some("".into())));
 
-            client
-                .framed
-                .send(RespValue::Array(response))
-                .await?;
+            client.framed.send(RespValue::Array(response)).await?;
         }
         RespCommand::Unsubscribe => {
             // TODO: Implement unsubscribe logic
@@ -263,6 +260,11 @@ async fn process_command(
 ) -> Result<Option<RespValue>, Box<dyn std::error::Error>> {
     let response_value = match command {
         RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
+        RespCommand::Publish(channel, msg) => {
+            let amount =store.send_to_channel(channel, msg).await?;
+            Some(RespValue::Integer(amount as i64))
+        },
+
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
