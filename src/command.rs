@@ -85,7 +85,7 @@ pub enum RespCommand {
         end: isize,
     },
 
-    Unsubscribe,
+    Unsubscribe(String),
     PSubscribe,
     PunSubscribe,
     Quit,
@@ -186,6 +186,8 @@ impl Command {
                     "xadd" => parse_xadd(command),
                     "xrange" => parse_xrange(command),
                     "xread" => parse_xread(command),
+                    "unsubscribe" => Ok(RespCommand::Unsubscribe(command.args[0].clone())),
+
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
             }

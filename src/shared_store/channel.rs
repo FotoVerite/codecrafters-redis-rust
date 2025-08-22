@@ -70,4 +70,24 @@ impl Store {
             Ok(0)
         }
     }
+
+    pub async fn unsubscribe(
+        &self,
+        channel_name: String,
+        addr: SocketAddr
+    ) -> anyhow::Result<()> {
+        let channel_name = format!("channel-{channel_name}");
+        let mut keyspace = self.keyspace.write().await;
+        if let Some(entry) = keyspace.get_mut(&channel_name) {
+            match &mut entry.value {
+                RedisValue::Channel(channel) => {
+                    channel.clients.remove(&addr);
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        } else {
+            Ok(())
+        }
+    }
 }

@@ -148,12 +148,10 @@ async fn handle_subscribed_mode(
 
             client.framed.send(RespValue::Array(response)).await?;
         }
-        RespCommand::Unsubscribe => {
+        RespCommand::Unsubscribe(channel_name) => {
             // TODO: Implement unsubscribe logic
-            client
-                .framed
-                .send(RespValue::SimpleString("OK".into()))
-                .await?;
+            unsubscribe_from_channel(store, channel_name, client).await?;
+
         }
         RespCommand::PSubscribe => {
             // TODO: Implement psubscribe logic
@@ -356,6 +354,25 @@ async fn subscribe_to_channel(
     client.channels.push(channel_name.clone());
     let mut response = vec![];
     response.push(RespValue::BulkString(Some("subscribe".into())));
+    response.push(RespValue::BulkString(Some(channel_name.into())));
+    response.push(RespValue::Integer(client.channels.len() as i64));
+    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
+        return Ok(()); // client disconnected immediately
+    }
+    Ok(())
+}
+
+async fn unsubscribe_from_channel(
+    store: Arc<Store>,
+    channel_name: String,
+    client: &mut Client,
+) -> anyhow::Result<()> {
+    _= store
+        .unsubscribe(channel_name.clone(), client.addr)
+        .await;
+    client.channels.pop();
+    let mut response = vec![];
+    response.push(RespValue::BulkString(Some("unsubscribe".into())));
     response.push(RespValue::BulkString(Some(channel_name.into())));
     response.push(RespValue::Integer(client.channels.len() as i64));
     if let Err(_) = client.framed.send(RespValue::Array(response)).await {
