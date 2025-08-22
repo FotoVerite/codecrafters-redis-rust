@@ -1,4 +1,4 @@
-use futures::{SinkExt, StreamExt};
+use futures::{channel, SinkExt, StreamExt};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     net::TcpStream,
@@ -22,7 +22,7 @@ use crate::{
     },
     rdb_parser::config::RdbConfig,
     replication_manager::manager::ReplicationManager,
-    resp::{RespValue},
+    resp::RespValue,
     server_info::ServerInfo,
     shared_store::shared_store::Store,
 };
@@ -103,11 +103,15 @@ async fn handle_normal_mode(
     match command {
         RespCommand::Subscribe(channel_name) => {
             client.mode = ClientMode::Subscribed;
-            subscribe(client, store, channel_name).await?;
+            run_subscribed_loop(client, store, channel_name).await?;
+            return Ok(()); // Break the loop after subscribe
         }
         RespCommand::Multi => {
             client.mode = ClientMode::Multi;
-            client.framed.send(RespValue::SimpleString("OK".into())).await?;
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
         }
         _ => {
             let response = process_command(
@@ -135,11 +139,49 @@ async fn handle_subscribed_mode(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         RespCommand::Subscribe(channel_name) => {
-            subscribe(client, store, channel_name).await?;
+            subscribe_to_channel(store, channel_name, client).await?;
         }
+        RespCommand::Ping => {
+            client
+                .framed
+                .send(RespValue::SimpleString("PONG".into()))
+                .await?;
+        }
+        RespCommand::Unsubscribe => {
+            // TODO: Implement unsubscribe logic
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
+        }
+        RespCommand::PSubscribe => {
+            // TODO: Implement psubscribe logic
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
+        }
+        RespCommand::PunSubscribe => {
+            // TODO: Implement punsubscribe logic
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
+        }
+        RespCommand::Quit => {
+            // TODO: Implement quit logic
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
+        }
+        // RespCommand::Reset => {
+        //     // TODO: Implement reset logic
+        //     client.framed.send(RespValue::SimpleString("OK".into())).await?;
+        // }
         _ => {
             let error_message = format!(
-                "ERR Can't execute '{:?}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
+                "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
                 command
             );
             client.framed.send(RespValue::Error(error_message)).await?;
@@ -189,12 +231,18 @@ async fn handle_multi_mode(
         }
         RespCommand::Discard => {
             client.mode = ClientMode::Normal;
-            client.framed.send(RespValue::SimpleString("OK".into())).await?;
+            client
+                .framed
+                .send(RespValue::SimpleString("OK".into()))
+                .await?;
             session.queued.clear();
         }
         _ => {
             session.queued.push((command, bytes));
-            client.framed.send(RespValue::BulkString(Some("QUEUED".into()))).await?;
+            client
+                .framed
+                .send(RespValue::BulkString(Some("QUEUED".into())))
+                .await?;
         }
     }
     Ok(())
@@ -266,34 +314,23 @@ async fn process_command(
     Ok(response_value)
 }
 
-async fn subscribe(
+async fn run_subscribed_loop(
     client: &mut Client,
     store: Arc<Store>,
     channel_name: String,
 ) -> anyhow::Result<()> {
-    let mut channels = vec![];
-    channels.push(channel_name.clone());
-    let addr = client.addr;
-    let (tx, mut rx) = mpsc::channel(1024);
-    let response =
-        subscribe_to_channel(store.clone(), channel_name, &mut channels, addr, tx.clone()).await;
-    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
-        return Ok(()); // client disconnected immediately
-    }
+    _ = subscribe_to_channel(Arc::clone(&store), channel_name, client).await;
+
     loop {
         tokio::select! {
-               Some(msg) = rx.recv() => {
+               Some(msg) = client.rx.recv() => {
                    // send pub/sub message to client
                    client.framed.send(msg).await?;
                },
                Some(Ok((resp_value, _bytes))) = client.framed.next() => {
-               if let Ok(command) = command::Command::try_from_resp(resp_value) {
-                   if let command::RespCommand::Subscribe(new_channel) = command {
-                       channels.push(new_channel.clone());
-                       let response = subscribe_to_channel(store.clone(), new_channel, &mut channels, addr, tx.clone()).await;
-                       client.framed.send(RespValue::Array(response)).await?;
-                   }
-               }
+                        let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
+
+              _ = handle_subscribed_mode(client,  command, Arc::clone(&store)).await;
            },
            else => break,
         // both streams closed
@@ -305,14 +342,18 @@ async fn subscribe(
 async fn subscribe_to_channel(
     store: Arc<Store>,
     channel_name: String,
-    channels: &mut Vec<String>,
-    addr: SocketAddr,
-    tx: Sender<RespValue>,
-) -> Vec<RespValue> {
-    store.subscribe(channel_name.clone(), addr, tx).await;
+    client: &mut Client,
+) -> anyhow::Result<()> {
+    store
+        .subscribe(channel_name.clone(), client.addr, client.tx.clone())
+        .await;
+    client.channels.push(channel_name.clone());
     let mut response = vec![];
     response.push(RespValue::BulkString(Some("subscribe".into())));
     response.push(RespValue::BulkString(Some(channel_name.into())));
-    response.push(RespValue::Integer(channels.len() as i64));
-    response
+    response.push(RespValue::Integer(client.channels.len() as i64));
+    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
+        return Ok(()); // client disconnected immediately
+    }
+    Ok(())
 }

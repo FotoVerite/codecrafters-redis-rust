@@ -83,13 +83,29 @@ pub enum RespCommand {
         start: isize,
         end: isize,
     },
+
+    Unsubscribe,
+    PSubscribe,
+    PunSubscribe,
+    Quit,
 }
 
-impl std::fmt::Display for RespCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+use std::fmt;
+
+impl fmt::Display for RespCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RespCommand::Ping => write!(f, "PING"),
+            RespCommand::Echo(_) => write!(f, "ECHO"),
+            RespCommand::Subscribe(_) => write!(f, "SUBSCRIBE"),
+            RespCommand::Set { .. } => write!(f, "SET"),
+            RespCommand::Get { .. } => write!(f, "get"),
+            // …add others as needed…
+            _ => write!(f, "{:?}", self), // fallback to Debug
+        }
     }
 }
+
 
 impl RespCommand {
     pub fn _to_resp(self) -> RespValue {
