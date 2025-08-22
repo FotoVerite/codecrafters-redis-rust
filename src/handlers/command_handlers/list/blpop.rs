@@ -71,15 +71,14 @@ pub async fn blpop_command(
     keys: &[String],
     timeout: u64,
 ) -> io::Result<Option<RespValue>> {
-    // 1️⃣ Check if any list already has values
+    // Lock keyspace while doing both
+    let notifiers = store.get_notifiers(keys).await; // register first
+
     if let Some(result) = try_poll_lpop(store, keys).await? {
+        // pop first if any value exists
         return Ok(Some(result));
     }
 
-    // 2️⃣ Get notifiers for the keys
-    let notifiers = store.get_notifiers(keys).await;
-
-    // 3️⃣ Decide whether to wait forever or with timeout
     if timeout == 0 {
         wait_forever(store, keys, &notifiers).await
     } else {
