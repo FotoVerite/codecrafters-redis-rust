@@ -97,7 +97,6 @@ impl Store {
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {
                 RedisValue::ZRank(zrank) => {
-                    let len = zrank.data.len();
                     let mut members: Vec<String> = zrank
                         .data
                         .iter()
@@ -107,6 +106,7 @@ impl Store {
                             v
                         })
                         .collect();
+                    let len: usize = members.len();
                     if len == 0 {
                         return Ok(vec![]);
                     }
@@ -172,6 +172,7 @@ impl Store {
                     if let Some(rank) = zrank.reverse_map.get(&value) {
                         let data = zrank.data.get_mut(&OrderedFloat(*rank)).unwrap();
                         data.remove(&value);
+                        zrank.reverse_map.remove(&value);
                         return Ok(Some(1i64));
                     }
                 }

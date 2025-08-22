@@ -289,18 +289,13 @@ async fn process_command(
             for ret in result {
                 response.push(RespValue::BulkString(Some(ret.into())))
             }
-            if response.is_empty() {
-                Some(RespValue::BulkString(None))
-            } else {
-                Some(RespValue::Array(response))
-            }
+            Some(RespValue::Array(response))
         }
         RespCommand::Zrank(key, value) => {
             let result = store.zrank_command(key, value).await?;
             if let Some(result) = result {
                 Some(RespValue::Integer(result as i64))
-            }
-            else {
+            } else {
                 Some(RespValue::BulkString(None))
             }
         }

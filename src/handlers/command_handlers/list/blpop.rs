@@ -4,7 +4,8 @@ use tokio::{sync::Notify, task};
 
 use crate::{resp::RespValue, shared_store::shared_store::Store};
 
-async fn poll_lpop(store: &Arc<Store>, keys: &Vec<String>) -> io::Result<Option<RespValue>> {
+/// Attempt to pop from any key immediately.
+async fn poll_lpop(store: &Arc<Store>, keys: &[String]) -> io::Result<Option<RespValue>> {
     for key in keys {
         if let Some(resp) = store.lpop(key.to_string(), 1).await? {
             if !resp.is_empty() {
@@ -19,75 +20,69 @@ async fn poll_lpop(store: &Arc<Store>, keys: &Vec<String>) -> io::Result<Option<
     Ok(None)
 }
 
-async fn try_poll_lpop(store: &Arc<Store>, keys: &Vec<String>) -> io::Result<Option<RespValue>> {
-    let result = poll_lpop(store, keys).await?;
-    if result.is_none() {
-        Ok(None)
-    } else {
-        Ok(result)
-    }
+/// Try to pop once; returns None if no data.
+async fn try_poll_lpop(store: &Arc<Store>, keys: &[String]) -> io::Result<Option<RespValue>> {
+    poll_lpop(store, keys).await
 }
+
+/// Wait with a timeout for any key to receive a push.
 async fn wait_with_timeout(
     store: &Arc<Store>,
-    keys: &Vec<String>,
-    notifiers: &Vec<Arc<Notify>>,
+    keys: &[String],
+    notifiers: &[Arc<Notify>],
     timeout_ms: u64,
 ) -> io::Result<Option<RespValue>> {
     let timeout = Duration::from_millis(timeout_ms);
-    let futures = notifiers
-        .iter()
-        .map(|n| Box::pin(n.notified()))
-        .collect::<Vec<_>>();
+    let futures = notifiers.iter().map(|n| Box::pin(n.notified())).collect::<Vec<_>>();
 
     tokio::select! {
         _ = select_all(futures) => {
             try_poll_lpop(store, keys).await
         }
         _ = tokio::time::sleep(timeout) => {
-            Ok(Some(RespValue::BulkString(None)))
+            Ok(Some(RespValue::BulkString(None))) // $-1\r\n for timeout
         }
     }
 }
 
+/// Wait forever until a value is available.
 async fn wait_forever(
     store: &Arc<Store>,
-    keys: &Vec<String>,
-    notifiers: &Vec<Arc<Notify>>,
+    keys: &[String],
+    notifiers: &[Arc<Notify>],
 ) -> io::Result<Option<RespValue>> {
-    println!("Waiting Forever .");
     loop {
-        let futures = notifiers
-            .iter()
-            .map(|n| Box::pin(n.notified()))
-            .collect::<Vec<_>>();
-
-        tokio::select! {
-            _ = select_all(futures) => {
-                println!("Waiting Forever called.");
-                task::yield_now().await;
-                match try_poll_lpop(store, keys).await? {
-                    Some(resp) => return Ok(Some(resp)),  // Pop successful, respond
-                    None => continue,                     // No data, go back to waiting
-                }
-            }
+        // Poll first: maybe a value appeared while awaiting
+        if let Some(resp) = try_poll_lpop(store, keys).await? {
+            return Ok(Some(resp));
         }
+
+        // No value yet: wait for any notifier
+        let futures = notifiers.iter().map(|n| Box::pin(n.notified())).collect::<Vec<_>>();
+        select_all(futures).await;
+
+        // Once notified, loop again to attempt poll
     }
 }
 
+/// Main BLPOP command entry
 pub async fn blpop_command(
     store: &Arc<Store>,
-    keys: &Vec<String>,
+    keys: &[String],
     timeout: u64,
 ) -> io::Result<Option<RespValue>> {
-    // First, check if any stream already has entries
+    // 1️⃣ Check if any list already has values
     if let Some(result) = try_poll_lpop(store, keys).await? {
         return Ok(Some(result));
     }
-    // Get notifiers for the keys
+
+    // 2️⃣ Get notifiers for the keys
     let notifiers = store.get_notifiers(keys).await;
-    // Decide whether to wait with timeout or wait forever
-    match timeout {
-        0 => wait_forever(store, keys, &notifiers).await, // <- changed
-        other => wait_with_timeout(store, keys, &notifiers, other).await,
+
+    // 3️⃣ Decide whether to wait forever or with timeout
+    if timeout == 0 {
+        wait_forever(store, keys, &notifiers).await
+    } else {
+        wait_with_timeout(store, keys, &notifiers, timeout).await
     }
 }
