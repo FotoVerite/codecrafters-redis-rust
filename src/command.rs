@@ -94,6 +94,8 @@ pub enum RespCommand {
     Zcard(String),
     Zrange(String, i64, i64),
     Zrank(String, String),
+    ZScore(String, String),
+    ZRem(String, String),
 }
 
 use std::fmt;
@@ -196,6 +198,12 @@ impl Command {
                     "zcard" => Ok(RespCommand::Zcard(command.args[0].clone())),
                     "zrange" => parse_zrange(command),
                     "zrank" => parse_zrank(command),
+                    "zscore" => Ok(RespCommand::ZScore(
+                        command.args[0].clone(),
+                        command.args[1].clone(),
+                    )),
+
+                    "zrm" => parse_zrem(command),
 
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
@@ -238,6 +246,16 @@ fn parse_zrank(command: Command) -> io::Result<RespCommand> {
     let rank = command.args[1].clone();
 
     Ok(RespCommand::Zrank(key, rank))
+}
+
+fn parse_zrem(command: Command) -> io::Result<RespCommand> {
+    if command.args.len() != 2 {
+        return Err(invalid_data_err("Unable to parse args"));
+    }
+    let key = command.args[0].clone();
+    let value: String = command.args[1].clone();
+
+    Ok(RespCommand::ZRem(key, value))
 }
 
 fn parse_zrange(command: Command) -> io::Result<RespCommand> {

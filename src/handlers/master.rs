@@ -291,6 +291,14 @@ async fn process_command(
             }
             Some(RespValue::Array(response))
         }
+        RespCommand::ZScore(key, value) => {
+            if let Some(result) = store.zscore(key, value).await? {
+                let string_msg = result.to_string();
+                Some(RespValue::BulkString(Some(string_msg.into())))
+            } else {
+                Some(RespValue::BulkString(None))
+            }
+        }
         RespCommand::Zrank(key, value) => {
             let result = store.zrank_command(key, value).await?;
             if let Some(result) = result {
