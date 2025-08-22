@@ -3,7 +3,6 @@ use std::{collections::HashMap, net::SocketAddr};
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    handlers::client,
     resp::RespValue,
     shared_store::shared_store::{Entry, RedisValue, Store},
 };
@@ -38,7 +37,7 @@ impl Store {
         } else {
             let mut channel = Channel::new(channel_name.clone());
             channel.clients.insert(client, tx);
-            let entry = Entry::new(RedisValue::Channel(channel), None);
+            let entry: Entry = Entry::new(RedisValue::Channel(channel), None);
             keyspace.insert(channel_name, entry);
         }
     }

@@ -275,6 +275,11 @@ async fn process_command(
         RespCommand::Lpush { key, values } => list::lpush(store, key, values).await?,
         RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
         RespCommand::Lrange { key, start, end } => list::lrange(store, key, start, end).await?,
+        
+        RespCommand::Zadd(key,rank,value ) => {
+            let result = store.zadd(key, rank, value).await?;
+            Some(RespValue::Integer(result))
+        }
 
         RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
         RespCommand::Incr(key) => store.incr(&key).await?,

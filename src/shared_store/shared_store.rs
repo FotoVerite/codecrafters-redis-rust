@@ -11,6 +11,7 @@ use crate::shared_store::channel::Channel;
 use crate::shared_store::redis_list::List;
 use crate::shared_store::redis_stream::{Stream, StreamEntries};
 use crate::shared_store::stream_id::StreamID;
+use crate::shared_store::zrank::Zrank;
 
 #[derive(Debug, Clone)]
 pub enum RedisValue {
@@ -18,6 +19,7 @@ pub enum RedisValue {
     Stream(Stream),
     List(List),
     Channel(Channel),
+    ZRank(Zrank),
     #[allow(dead_code)]
     Queue(VecDeque<Vec<u8>>), // Add ZSet, List, etc. as needed
 }
@@ -75,6 +77,7 @@ impl Store {
                 RedisValue::Stream(_) => Ok(RespValue::SimpleString("stream".into())),
                 RedisValue::Text(_) => Ok(RespValue::SimpleString("string".into())),
                 RedisValue::Queue(_) => Ok(RespValue::SimpleString("queue".into())),
+                RedisValue::ZRank(_) => Ok(RespValue::SimpleString("zrank".into())),
             },
             None => Ok(RespValue::SimpleString("none".into())),
         }

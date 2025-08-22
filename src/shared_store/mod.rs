@@ -3,3 +3,4 @@ pub mod redis_stream;
 pub mod stream_id;
 pub mod redis_list;
 pub mod channel;
+pub mod zrank;
