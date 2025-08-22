@@ -142,9 +142,13 @@ async fn handle_subscribed_mode(
             subscribe_to_channel(store, channel_name, client).await?;
         }
         RespCommand::Ping => {
+            let mut response = vec![];
+            response.push(RespValue::BulkString(Some("pong".into())));
+            response.push(RespValue::BulkString(Some("".into())));
+
             client
                 .framed
-                .send(RespValue::SimpleString("PONG".into()))
+                .send(RespValue::Array(response))
                 .await?;
         }
         RespCommand::Unsubscribe => {

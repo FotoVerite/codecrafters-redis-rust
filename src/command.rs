@@ -38,6 +38,7 @@ pub enum RespCommand {
     Exec,
     Discard,
     Ping,
+    Publish(String),
     PSYNC(String, i64),
     #[allow(dead_code)]
     RDB(Option<Vec<u8>>),
