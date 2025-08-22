@@ -48,7 +48,7 @@ impl Store {
         channel_name: String,
         msg: String,
     ) -> anyhow::Result<usize> {
-        let called_name = channel_name.clone()
+        let called_name = channel_name.clone();
         let channel_name = format!("channel-{channel_name}");
         let mut keyspace = self.keyspace.write().await;
         if let Some(entry) = keyspace.get_mut(&channel_name) {
