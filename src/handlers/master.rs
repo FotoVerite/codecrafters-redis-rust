@@ -280,6 +280,18 @@ async fn process_command(
             let result = store.zadd(key, rank, value).await?;
             Some(RespValue::Integer(result))
         }
+         RespCommand::Zcard(key) => {
+            let result = store.zcard(key).await?;
+            Some(RespValue::Integer(result))
+        }
+         RespCommand::Zrange(key,start,stop ) => {
+            let result = store.zrange(key, start, stop).await?;
+            let mut response = vec![];
+            for ret in result {
+                response.push(RespValue::BulkString(Some(ret.into())))
+            }
+            Some(RespValue::Array(response))
+        }
 
         RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
         RespCommand::Incr(key) => store.incr(&key).await?,

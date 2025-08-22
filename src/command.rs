@@ -91,6 +91,8 @@ pub enum RespCommand {
     Quit,
 
     Zadd(String, f64, String),
+    Zcard(String),
+    Zrange(String, i64, i64),
 }
 
 use std::fmt;
@@ -190,6 +192,8 @@ impl Command {
                     "xread" => parse_xread(command),
                     "unsubscribe" => Ok(RespCommand::Unsubscribe(command.args[0].clone())),
                     "zadd" => parse_zadd(command),
+                    "zcard" =>Ok(RespCommand::Zcard(command.args[0].clone())),
+                    "zrange" => parse_zrange(command),
 
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
@@ -222,6 +226,20 @@ fn parse_zadd(command: Command) -> io::Result<RespCommand> {
         .parse::<f64>()
         .map_err(|_| invalid_data_err("Unable to parse param"))?;
     Ok(RespCommand::Zadd(key, rank, command.args[2].clone()))
+}
+
+fn parse_zrange(command: Command) -> io::Result<RespCommand> {
+    if command.args.len() != 3 {
+        return Err(invalid_data_err("Unable to parse args"));
+    }
+    let key = command.args[0].clone();
+    let start = command.args[1]
+        .parse::<i64>()
+        .map_err(|_| invalid_data_err("Unable to parse param"))?;
+    let end = command.args[2]
+        .parse::<i64>()
+        .map_err(|_| invalid_data_err("Unable to parse param"))?;
+    Ok(RespCommand::Zrange(key, start, end))
 }
 
 fn parse_blpop_command(mut command: Command) -> io::Result<RespCommand> {

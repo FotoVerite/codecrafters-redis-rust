@@ -31,11 +31,13 @@ impl Zrank {
 impl Store {
     pub async fn zadd(&self, key: String, rank: f64, value: String) -> anyhow::Result<i64> {
         let mut keyspace = self.keyspace.write().await;
+        let mut old_value = false;
         if let Some(entry) = keyspace.get_mut(&key) {
             match &mut entry.value {
                 RedisValue::ZRank(zrank) => {
                     if let Some(old_rank) = zrank.reverse_map.get(&value) {
                         if old_rank != &rank {
+                            old_value = true;
                             zrank
                                 .data
                                 .get_mut(&OrderedFloat(*old_rank))
@@ -46,7 +48,7 @@ impl Store {
                     zrank.reverse_map.insert(value.clone(), rank);
                     let data = zrank.data.entry(OrderedFloat(rank)).or_default();
                     let added = data.insert(value.clone());
-                    if added {
+                    if added && !old_value {
                         Ok(1)
                     } else {
                         Ok(0)
@@ -56,6 +58,7 @@ impl Store {
             }
         } else {
             let mut zrank = Zrank::new();
+            zrank.reverse_map.insert(value.clone(), rank);
             let mut set = HashSet::new();
             set.insert(value);
             zrank.data.insert(OrderedFloat(rank), set);
@@ -81,19 +84,51 @@ impl Store {
         Ok(None)
     }
 
-    // pub async fn zrange(&self, key: String, rank: f64) -> anyhow::Result<Vec<String>> {
-    //     let mut keyspace = self.keyspace.read().await;
-    //     if let Some(entry) = keyspace.get(&key) {
-    //          match &entry.value {
-    //             RedisValue::ZRank(zrank) => {
-    //                 zrank.data.ran
-    //                 return Ok(vec![])
-    //             }
-    //             _ => return Ok(vec![])
-    //          }
-    //     }
-    //     Ok(vec![])
-    // }
+    pub async fn zrange(
+        &self,
+        key: String,
+        start: i64,
+        stop: i64,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut keyspace = self.keyspace.read().await;
+        if let Some(entry) = keyspace.get(&key) {
+            match &entry.value {
+                RedisValue::ZRank(zrank) => {
+                    let len = zrank.data.len();
+                    let mut members: Vec<String> = zrank
+                        .data
+                        .iter()
+                        .flat_map(|(_, set)| {
+                            let mut v: Vec<String> = set.iter().cloned().collect();
+                            v.sort(); // sort members with same score lexicographically
+                            v
+                        })
+                        .collect();
+                    if len == 0 {
+                        return Ok(vec![]);
+                    }
+
+                    let start = normalize_index(start, len);
+                    let mut stop = normalize_index(stop, len);
+
+                    if start > stop {
+                        return Ok(vec![]);
+                    }
+
+                    if stop >= len {
+                        stop = len - 1;
+                    }
+
+                    // Grab the slice and map to just the member strings
+                    let range = members[start..=stop].to_vec();
+
+                    return Ok(range);
+                }
+                _ => return Ok(vec![]),
+            }
+        }
+        Ok(vec![])
+    }
 
     pub async fn zcard(&self, key: String) -> anyhow::Result<i64> {
         let mut keyspace = self.keyspace.read().await;
@@ -141,5 +176,20 @@ impl Store {
             }
         }
         Ok(None)
+    }
+}
+
+fn normalize_index(idx: i64, len: usize) -> usize {
+    if idx < 0 {
+        let abs = (-idx) as usize;
+        if abs > len {
+            0
+        } else {
+            len - abs
+        }
+    } else if idx as usize >= len {
+        len
+    } else {
+        idx as usize
     }
 }
