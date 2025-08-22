@@ -307,6 +307,14 @@ async fn process_command(
                 Some(RespValue::BulkString(None))
             }
         }
+         RespCommand::ZRem(key, value) => {
+            let result = store.zrem(key, value).await?;
+            if let Some(result) = result {
+                Some(RespValue::Integer(result as i64))
+            } else {
+                Some(RespValue::Integer(0))
+            }
+        }
 
         RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
         RespCommand::Incr(key) => store.incr(&key).await?,

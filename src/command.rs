@@ -203,7 +203,7 @@ impl Command {
                         command.args[1].clone(),
                     )),
 
-                    "zrm" => parse_zrem(command),
+                    "zrem" => parse_zrem(command),
 
                     other => invalid_data(format!("Unexpected Command: {}", other)),
                 }
