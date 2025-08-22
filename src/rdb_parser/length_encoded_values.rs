@@ -17,7 +17,7 @@ impl fmt::Display for LengthEncodedValue {
             LengthEncodedValue::String(_) => "String",
             LengthEncodedValue::Integer(_) => "Int",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 pub enum ValueEncoding {
@@ -57,7 +57,7 @@ impl LengthEncodedValue {
                 Ok(LengthEncodedValue::Integer(u32::from_be_bytes(buf) as u64))
             }
             _ => {
-                return Err(invalid_data_err(&format!("Compressed String")));
+                Err(invalid_data_err("Compressed String".to_string()))
             }
         }
     }
@@ -67,10 +67,9 @@ impl LengthEncodedValue {
         match length {
             LengthEncodedValue::String(value) => Ok(value),
             other => {
-                return Err(invalid_data_err(&format!(
-                    "Expected String value got {}",
-                    other
-                )));
+                Err(invalid_data_err(format!(
+                    "Expected String value got {other}"
+                )))
             }
         }
     }
@@ -80,10 +79,9 @@ impl LengthEncodedValue {
         match length {
             LengthEncodedValue::Integer(int) => Ok(int as usize),
             other => {
-                return Err(invalid_data_err(&format!(
-                    "Expected Int value got {}",
-                    other
-                )));
+                Err(invalid_data_err(format!(
+                    "Expected Int value got {other}"
+                )))
             }
         }
     }
@@ -94,9 +92,7 @@ impl LengthEncodedValue {
                 Ok(value)
             },
             _ => {
-                return Err(invalid_data_err(&format!(
-                    "Expected int as String Value got int encoding",
-                )));
+                Err(invalid_data_err("Expected int as String Value got int encoding".to_string()))
             }
         }
     }
@@ -105,7 +101,7 @@ impl LengthEncodedValue {
         let mut first_byte = [0u8; 1];
         reader.read_exact(&mut first_byte)?;
         let b = first_byte[0];
-        return match b {
+        match b {
             0x00..=0x3F => Ok(ValueEncoding::String((b & 0x3F) as usize)),
             0x40..=0x7F => {
                 let mut next_byte = [0u8; 1];
@@ -122,12 +118,11 @@ impl LengthEncodedValue {
             0xC1 => Ok(ValueEncoding::Int16),
             0xC2 => Ok(ValueEncoding::Int32),
             _ => {
-                return Err(invalid_data_err(&format!(
-                    "unknown integer encoding prefix: {}",
-                    b
-                )));
+                Err(invalid_data_err(format!(
+                    "unknown integer encoding prefix: {b}"
+                )))
             }
-        };
+        }
     }
 }
 

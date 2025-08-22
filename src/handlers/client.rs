@@ -22,7 +22,7 @@ pub struct Client {
 impl Client {
     pub fn new(socket: TcpStream) -> Self {
         let addr = socket.peer_addr().unwrap();
-        let (tx, mut rx) = mpsc::channel(1024);
+        let (tx, rx) = mpsc::channel(1024);
 
         Self {
             framed: Framed::new(socket, RespCodec),

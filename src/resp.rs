@@ -64,7 +64,7 @@ fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<RespValue>, io
         // So maybe pos is the start of REDIS? If so, better to just return None to wait for full data
         // Or split off the prefix before REDIS and return it
         let prefix = src.split_to(pos);
-        return Ok(Some(RespValue::RDB(Some(prefix.to_vec()))));
+        Ok(Some(RespValue::RDB(Some(prefix.to_vec()))))
     } else {
         // Need at least pos + 2 bytes for CRLF
         if src.len() < pos + 2 {
@@ -81,7 +81,7 @@ fn digest_stream(src: &mut BytesMut, pos: usize) -> Result<Option<RespValue>, io
             ));
         }
         let resp = RespValue::BulkString(Some(line.to_vec()));
-        return Ok(Some(resp));
+        Ok(Some(resp))
     }
 }
 fn simple_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
@@ -117,7 +117,7 @@ fn bulk_string(src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
         if bytes == -1 {
             return Ok(Some(RespValue::BulkString(None)));
         }
-        return Ok(digest_stream(src, bytes as usize)?);
+        return digest_stream(src, bytes as usize);
     }
     Ok(None)
 }
@@ -153,7 +153,7 @@ impl RespCodec {
     }
 
     fn parse_bytes(&mut self, src: &mut BytesMut) -> io::Result<Option<RespValue>> {
-        if let Some(chr) = src.get(0) {
+        if let Some(chr) = src.first() {
             match chr {
                 b'+' => return simple_string(src),
                 b'-' => return error_string(src),
@@ -166,7 +166,7 @@ impl RespCodec {
                 other => {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Unknown RESP type {}", other),
+                        format!("Unknown RESP type {other}"),
                     ))
                 }
             }
@@ -202,7 +202,7 @@ fn write_bulk_string(dst: &mut BytesMut, option: Option<Vec<u8>>) -> Result<(), 
         Some(data) => {
             // Write: $<length>\r\n<data>\r\n
             let len = data.len();
-            dst.extend_from_slice(format!("${}\r\n", len).as_bytes());
+            dst.extend_from_slice(format!("${len}\r\n").as_bytes());
             dst.extend_from_slice(&data);
             dst.extend_from_slice(b"\r\n");
         }

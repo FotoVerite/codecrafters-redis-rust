@@ -31,7 +31,7 @@ pub struct Stream {
 impl Stream {
     pub fn append(&mut self, id: StreamID, fields: Fields) -> io::Result<()> {
         let entry = StreamEntry::Data {
-            id: id.clone(),
+            id,
             fields,
         };
         Self::validate_id(&id, self.previous_id())?;
@@ -49,14 +49,14 @@ impl Stream {
 
     pub fn new(notify: Arc<Notify>) -> Self {
         Self {
-            notify: notify,
+            notify,
             entries: BTreeMap::new(),
         }
     }
     pub fn get_from(&self, start: StreamID) -> StreamEntries {
         self.entries
             .range::<StreamID, _>((Excluded(start), Unbounded))
-            .map(|(id, entry)| (id.clone(), entry.clone()))
+            .map(|(id, entry)| (*id, entry.clone()))
             .collect()
     }
     pub fn get_range(&self, start: Option<StreamID>, end: Option<StreamID>) -> StreamEntries {
@@ -74,7 +74,7 @@ impl Stream {
         };
         self.entries
             .range::<StreamID, _>((lower, upper))
-            .map(|(id, entry)| (id.clone(), entry.clone()))
+            .map(|(id, entry)| (*id, entry.clone()))
             .collect()
     }
 

@@ -76,8 +76,8 @@ pub async fn handle_ack_command(string: String, store: Arc<Store>) -> Option<Res
             let length = store.get_offset().await;
             values.push(RespValue::BulkString(Some(length.to_string().into())));
 
-            return Some(RespValue::Array(values));
+            Some(RespValue::Array(values))
         }
-        _ => return None,
-    };
+        _ => None,
+    }
 }

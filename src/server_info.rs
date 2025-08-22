@@ -44,7 +44,7 @@ impl ServerInfo {
             match arg.as_str() {
                 "--port" => {
                     if let Some(port_str) = args.next() {
-                        tcp_port = port_str.parse().unwrap_or_else(|_| 6379u16)
+                        tcp_port = port_str.parse().unwrap_or(6379u16)
                     }
                 }
                 "--replicaof" => {
@@ -162,7 +162,7 @@ impl ServerInfo {
                 if !fullresync_line.starts_with("FULLRESYNC") {
                     return Err("Expected +FULLRESYNC line".into());
                 }
-                println!("Got FULLRESYNC: {}", fullresync_line);
+                println!("Got FULLRESYNC: {fullresync_line}");
             } else {
                 return Err("Expected +FULLRESYNC line".into());
             }
@@ -226,8 +226,8 @@ async fn _read_rdb_from_master(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut reader = BufReader::new(stream);
     let peek = reader.fill_buf().await?;
-    if peek.first() == Some(&b'$') {
-        if peek.windows(5).any(|w| w == b"REDIS") {
+    if peek.first() == Some(&b'$')
+        && peek.windows(5).any(|w| w == b"REDIS") {
             println!("RDB magic number found inside peek buffer");
 
             let mut len_line = String::new();
@@ -240,7 +240,6 @@ async fn _read_rdb_from_master(
             println!("READ RDB");
             return Ok(rdb);
         }
-    }
     println!("NO RDB");
     Ok(vec![])
 }

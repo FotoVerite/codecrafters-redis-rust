@@ -117,8 +117,8 @@ impl Store {
 
     pub async fn resolve_stream_ids(
         &self,
-        keys: &Vec<String>,
-        ids: &Vec<String>,
+        keys: &[String],
+        ids: &[String],
     ) -> io::Result<Vec<StreamID>> {
         if keys.len() != ids.len() {
             return Err(invalid_data_err("Mismatched keys and IDs"));
@@ -130,10 +130,10 @@ impl Store {
                 "$" => {
                     let entry = map
                         .get(key)
-                        .ok_or_else(|| invalid_data_err(format!("Missing key: {}", key)))?;
+                        .ok_or_else(|| invalid_data_err(format!("Missing key: {key}")))?;
 
                     match &entry.value {
-                        RedisValue::Stream(stream) => ret.push(stream.previous_id().clone()),
+                        RedisValue::Stream(stream) => ret.push(*stream.previous_id()),
                         _ => return invalid_data("Key is not for a stream"),
                     }
                 }
@@ -156,9 +156,7 @@ impl Store {
                         values.push(RespValue::BulkString(Some(key.as_bytes().to_vec())));
                     }
                 }
-            } else {
-                ()
-            }
+            } 
         }
 
         RespValue::Array(values)
@@ -271,7 +269,7 @@ impl Store {
             Some(entry) => match &entry.value {
                 RedisValue::List(arr) => {
                     let len = arr.entries.len();
-                    return Ok(len);
+                    Ok(len)
                 }
                 _ => Err(invalid_data_err(
                     "ERR LPUSH on key holding the wrong kind of value",
@@ -308,7 +306,7 @@ impl Store {
 
                     let u_start = start as usize;
                     let u_end = (end + 1) as usize;
-                    return Ok(arr.entries[u_start..u_end].to_vec());
+                    Ok(arr.entries[u_start..u_end].to_vec())
                 }
                 _ => Err(invalid_data_err(
                     "ERR LPUSH on key holding the wrong kind of value",
@@ -389,13 +387,13 @@ impl Store {
                 RedisValue::Stream(stream) => {
                     let stream_id: StreamID =
                         StreamID::from_redis_input(Some(*stream.previous_id()), id)?;
-                    stream.append(stream_id.clone(), fields)?;
+                    stream.append(stream_id, fields)?;
                     Ok(stream_id.to_string())
                 }
                 _ => {
-                    return Err(invalid_data_err(
+                    Err(invalid_data_err(
                         "ERR calling None Stream Value with stream key",
-                    ));
+                    ))
                 }
             }
         } else {
@@ -405,7 +403,7 @@ impl Store {
                 .entry(key.to_string())
                 .or_insert(Arc::new(Notify::new()));
             let mut stream = Stream::new(notify.clone());
-            stream.append(stream_id.clone(), fields)?;
+            stream.append(stream_id, fields)?;
             let entry = Entry::new(RedisValue::Stream(stream), None);
             map.insert(key.to_string(), entry);
             Ok(stream_id.to_string())

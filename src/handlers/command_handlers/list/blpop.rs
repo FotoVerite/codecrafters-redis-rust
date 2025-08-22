@@ -1,6 +1,6 @@
 use futures::future::select_all;
 use std::{io, sync::Arc, time::Duration};
-use tokio::{sync::Notify, task};
+use tokio::sync::Notify;
 
 use crate::{resp::RespValue, shared_store::shared_store::Store};
 

@@ -1,11 +1,6 @@
-use futures::{channel, SinkExt, StreamExt};
-use std::{net::SocketAddr, sync::Arc};
+use futures::{SinkExt, StreamExt};
 use tokio::{
     net::TcpStream,
-    sync::{
-        mpsc::{self, Sender},
-        Mutex,
-    },
 };
 
 use crate::{
@@ -20,19 +15,13 @@ use crate::{
         replication::handle_replconf_command,
         session::Session,
     },
-    rdb_parser::config::RdbConfig,
-    replication_manager::manager::ReplicationManager,
     resp::RespValue,
-    server_info::ServerInfo,
-    shared_store::shared_store::Store,
+    server_context::ServerContext,
 };
 
 pub async fn handle_master_connection(
     socket: TcpStream,
-    store: Arc<Store>,
-    rdb: Arc<RdbConfig>,
-    manager: Arc<Mutex<ReplicationManager>>,
-    info: Arc<ServerInfo>,
+    context: ServerContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = Client::new(socket);
     let mut session = Session::new();
@@ -46,8 +35,8 @@ pub async fn handle_master_connection(
                 client.framed,
                 string,
                 pos,
-                info.clone(),
-                manager.clone(),
+                context.info.clone(),
+                context.manager.clone(),
                 client.addr.to_string(),
             )
             .await?;
@@ -61,15 +50,12 @@ pub async fn handle_master_connection(
                     &mut session,
                     command,
                     bytes,
-                    store.clone(),
-                    rdb.clone(),
-                    manager.clone(),
-                    info.clone(),
+                    &context,
                 )
                 .await?;
             }
             ClientMode::Subscribed => {
-                handle_subscribed_mode(&mut client, command, store.clone()).await?;
+                handle_subscribed_mode(&mut client, command, &context).await?;
             }
             ClientMode::Multi => {
                 handle_multi_mode(
@@ -77,10 +63,7 @@ pub async fn handle_master_connection(
                     &mut session,
                     command,
                     bytes,
-                    store.clone(),
-                    rdb.clone(),
-                    manager.clone(),
-                    info.clone(),
+                    &context,
                 )
                 .await?;
             }
@@ -95,15 +78,12 @@ async fn handle_normal_mode(
     _session: &mut Session,
     command: RespCommand,
     bytes: Vec<u8>,
-    store: Arc<Store>,
-    rdb: Arc<RdbConfig>,
-    manager: Arc<Mutex<ReplicationManager>>,
-    info: Arc<ServerInfo>,
+    context: &ServerContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         RespCommand::Subscribe(channel_name) => {
             client.mode = ClientMode::Subscribed;
-            run_subscribed_loop(client, store, channel_name).await?;
+            run_subscribed_loop(client, context, channel_name).await?;
             return Ok(()); // Break the loop after subscribe
         }
         RespCommand::Multi => {
@@ -115,10 +95,7 @@ async fn handle_normal_mode(
         }
         _ => {
             let response = process_command(
-                store,
-                rdb,
-                manager,
-                info,
+                context,
                 command,
                 bytes,
                 &mut Some(client.addr.to_string()),
@@ -135,22 +112,23 @@ async fn handle_normal_mode(
 async fn handle_subscribed_mode(
     client: &mut Client,
     command: RespCommand,
-    store: Arc<Store>,
+    context: &ServerContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         RespCommand::Subscribe(channel_name) => {
-            subscribe_to_channel(store, channel_name, client).await?;
+            subscribe_to_channel(context, channel_name, client).await?;
         }
         RespCommand::Ping => {
-            let mut response = vec![];
-            response.push(RespValue::BulkString(Some("pong".into())));
-            response.push(RespValue::BulkString(Some("".into())));
+            let response = vec![
+                RespValue::BulkString(Some("pong".into())),
+                RespValue::BulkString(Some("".into())),
+            ];
 
             client.framed.send(RespValue::Array(response)).await?;
         }
         RespCommand::Unsubscribe(channel_name) => {
             // TODO: Implement unsubscribe logic
-            unsubscribe_from_channel(store, channel_name, client).await?;
+            unsubscribe_from_channel(context, channel_name, client).await?;
         }
         RespCommand::PSubscribe => {
             // TODO: Implement psubscribe logic
@@ -179,8 +157,7 @@ async fn handle_subscribed_mode(
         // }
         _ => {
             let error_message = format!(
-                "ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context",
-                command
+                "ERR Can't execute '{command}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context"
             );
             client.framed.send(RespValue::Error(error_message)).await?;
         }
@@ -193,10 +170,7 @@ async fn handle_multi_mode(
     session: &mut Session,
     command: RespCommand,
     bytes: Vec<u8>,
-    store: Arc<Store>,
-    rdb: Arc<RdbConfig>,
-    manager: Arc<Mutex<ReplicationManager>>,
-    info: Arc<ServerInfo>,
+    context: &ServerContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         RespCommand::Exec => {
@@ -209,10 +183,7 @@ async fn handle_multi_mode(
             let queue = &session.queued.clone();
             for (queued_command, bytes) in queue {
                 let response = process_command(
-                    store.clone(),
-                    rdb.clone(),
-                    manager.clone(),
-                    info.clone(),
+                    context,
                     queued_command.clone(),
                     bytes.clone(),
                     &mut Some(client.addr.to_string()),
@@ -247,10 +218,7 @@ async fn handle_multi_mode(
 }
 
 async fn process_command(
-    store: Arc<Store>,
-    rdb: Arc<RdbConfig>,
-    manager: Arc<Mutex<ReplicationManager>>,
-    info: Arc<ServerInfo>,
+    context: &ServerContext,
     command: RespCommand,
     bytes: Vec<u8>,
     peer_addr: &mut Option<String>,
@@ -258,7 +226,7 @@ async fn process_command(
     let response_value = match command {
         RespCommand::Ping => Some(RespValue::SimpleString("PONG".into())),
         RespCommand::Publish(channel, msg) => {
-            let amount = store.send_to_channel(channel, msg).await?;
+            let amount = context.store.send_to_channel(channel, msg).await?;
             Some(RespValue::Integer(amount as i64))
         }
 
@@ -266,25 +234,25 @@ async fn process_command(
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
         RespCommand::Discard => Some(RespValue::Error("ERR DISCARD without MULTI".into())),
         RespCommand::BLPop(keys, timeout) => {
-            list::blpop::blpop_command(&store, &keys, timeout).await?
+            list::blpop::blpop_command(&context.store, &keys, timeout).await?
         }
 
-        RespCommand::Llen(key) => list::llen(store, key).await?,
-        RespCommand::Lpop(key, amount) => list::lpop(store, key, amount).await?,
-        RespCommand::Lpush { key, values } => list::lpush(store, key, values).await?,
-        RespCommand::Rpush { key, values } => list::rpush(store, key, values).await?,
-        RespCommand::Lrange { key, start, end } => list::lrange(store, key, start, end).await?,
+        RespCommand::Llen(key) => list::llen(context.store.clone(), key).await?,
+        RespCommand::Lpop(key, amount) => list::lpop(context.store.clone(), key, amount).await?,
+        RespCommand::Lpush { key, values } => list::lpush(context.store.clone(), key, values).await?,
+        RespCommand::Rpush { key, values } => list::rpush(context.store.clone(), key, values).await?,
+        RespCommand::Lrange { key, start, end } => list::lrange(context.store.clone(), key, start, end).await?,
 
         RespCommand::Zadd(key, rank, value) => {
-            let result = store.zadd(key, rank, value).await?;
+            let result = context.store.zadd(key, rank, value).await?;
             Some(RespValue::Integer(result))
         }
         RespCommand::Zcard(key) => {
-            let result = store.zcard(key).await?;
+            let result = context.store.zcard(key).await?;
             Some(RespValue::Integer(result))
         }
         RespCommand::Zrange(key, start, stop) => {
-            let result = store.zrange(key, start, stop).await?;
+            let result = context.store.zrange(key, start, stop).await?;
             let mut response = vec![];
             for ret in result {
                 response.push(RespValue::BulkString(Some(ret.into())))
@@ -292,7 +260,7 @@ async fn process_command(
             Some(RespValue::Array(response))
         }
         RespCommand::ZScore(key, value) => {
-            if let Some(result) = store.zscore(key, value).await? {
+            if let Some(result) = context.store.zscore(key, value).await? {
                 let string_msg = result.to_string();
                 Some(RespValue::BulkString(Some(string_msg.into())))
             } else {
@@ -300,7 +268,7 @@ async fn process_command(
             }
         }
         RespCommand::Zrank(key, value) => {
-            let result = store.zrank_command(key, value).await?;
+            let result = context.store.zrank_command(key, value).await?;
             if let Some(result) = result {
                 Some(RespValue::Integer(result as i64))
             } else {
@@ -308,48 +276,48 @@ async fn process_command(
             }
         }
          RespCommand::ZRem(key, value) => {
-            let result = store.zrem(key, value).await?;
+            let result = context.store.zrem(key, value).await?;
             if let Some(result) = result {
-                Some(RespValue::Integer(result as i64))
+                Some(RespValue::Integer(result))
             } else {
                 Some(RespValue::Integer(0))
             }
         }
 
         RespCommand::Multi => Some(RespValue::Error("ERR MULTI calls can not be nested".into())),
-        RespCommand::Incr(key) => store.incr(&key).await?,
-        RespCommand::Get(key) => Some(store.get(&key).await?),
+        RespCommand::Incr(key) => context.store.incr(&key).await?,
+        RespCommand::Get(key) => Some(context.store.get(&key).await?),
         RespCommand::Set { key, value, px } => {
-            set::set_command(&store, &manager, key, &value, px, bytes).await?
+            set::set_command(&context.store, &context.manager, key, &value, px, bytes).await?
         }
 
-        RespCommand::Type(key) => type_command::type_command(&store, key).await?,
-        RespCommand::ConfigCommand(command) => Some(config::config_command(command, rdb.clone())),
-        RespCommand::Keys(string) => Some(super::keys::keys_command(string, store.clone()).await),
-        RespCommand::Info(string) => Some(super::info::info_command(string, info.clone())),
+        RespCommand::Type(key) => type_command::type_command(&context.store, key).await?,
+        RespCommand::ConfigCommand(command) => Some(config::config_command(command, context.rdb.clone())),
+        RespCommand::Keys(string) => Some(super::keys::keys_command(string, context.store.clone()).await),
+        RespCommand::Info(string) => Some(super::info::info_command(string, context.info.clone())),
         RespCommand::ReplconfCommand(command) => {
             let mut p_addr = peer_addr.clone();
-            let ret = handle_replconf_command(command, info.clone(), &mut p_addr);
+            let ret = handle_replconf_command(command, context.info.clone(), &mut p_addr);
             *peer_addr = p_addr;
             Some(ret)
         }
         RespCommand::RDB(_) => None,
         RespCommand::Wait(required_replicas, timeout_ms) => {
-            wait::wait_command(&store, &manager, required_replicas, timeout_ms).await?
+            wait::wait_command(&context.store, &context.manager, required_replicas, timeout_ms).await?
         }
 
         RespCommand::Xadd { key, id, fields } => {
-            xadd::xadd_command(&store, key, id, fields, bytes).await?
+            xadd::xadd_command(&context.store, key, id, fields, bytes).await?
         } // Should be handled above
         RespCommand::Xrange { key, start, end } => {
-            xrange::xrange_command(&store, key, start, end).await?
+            xrange::xrange_command(&context.store, key, start, end).await?
         }
         RespCommand::Xread {
             count: _,
             block,
             keys,
             ids,
-        } => stream::xread_command(&store, &block, &keys, &ids).await?,
+        } => stream::xread_command(&context.store, &block, &keys, &ids).await?,
         _ => {
             unimplemented!("{:?}", format!("{}", command))
         }
@@ -360,10 +328,10 @@ async fn process_command(
 
 async fn run_subscribed_loop(
     client: &mut Client,
-    store: Arc<Store>,
+    context: &ServerContext,
     channel_name: String,
 ) -> anyhow::Result<()> {
-    _ = subscribe_to_channel(Arc::clone(&store), channel_name, client).await;
+    _ = subscribe_to_channel(context, channel_name, client).await;
 
     loop {
         tokio::select! {
@@ -374,7 +342,7 @@ async fn run_subscribed_loop(
                Some(Ok((resp_value, _bytes))) = client.framed.next() => {
                         let command: command::RespCommand = command::Command::try_from_resp(resp_value)?;
 
-              _ = handle_subscribed_mode(client,  command, Arc::clone(&store)).await;
+              _ = handle_subscribed_mode(client,  command, context).await;
            },
            else => break,
         // both streams closed
@@ -384,36 +352,38 @@ async fn run_subscribed_loop(
 }
 
 async fn subscribe_to_channel(
-    store: Arc<Store>,
+    context: &ServerContext,
     channel_name: String,
     client: &mut Client,
 ) -> anyhow::Result<()> {
-    store
+    context.store
         .subscribe(channel_name.clone(), client.addr, client.tx.clone())
         .await;
     client.channels.push(channel_name.clone());
-    let mut response = vec![];
-    response.push(RespValue::BulkString(Some("subscribe".into())));
-    response.push(RespValue::BulkString(Some(channel_name.into())));
-    response.push(RespValue::Integer(client.channels.len() as i64));
-    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
+    let response = vec![
+        RespValue::BulkString(Some("subscribe".into())),
+        RespValue::BulkString(Some(channel_name.into())),
+        RespValue::Integer(client.channels.len() as i64),
+    ];
+    if (client.framed.send(RespValue::Array(response)).await).is_err() {
         return Ok(()); // client disconnected immediately
     }
     Ok(())
 }
 
 async fn unsubscribe_from_channel(
-    store: Arc<Store>,
+    context: &ServerContext,
     channel_name: String,
     client: &mut Client,
 ) -> anyhow::Result<()> {
-    _ = store.unsubscribe(channel_name.clone(), client.addr).await;
+    _ = context.store.unsubscribe(channel_name.clone(), client.addr).await;
     client.channels.pop();
-    let mut response = vec![];
-    response.push(RespValue::BulkString(Some("unsubscribe".into())));
-    response.push(RespValue::BulkString(Some(channel_name.into())));
-    response.push(RespValue::Integer(client.channels.len() as i64));
-    if let Err(_) = client.framed.send(RespValue::Array(response)).await {
+    let response = vec![
+        RespValue::BulkString(Some("unsubscribe".into())),
+        RespValue::BulkString(Some(channel_name.into())),
+        RespValue::Integer(client.channels.len() as i64),
+    ];
+    if (client.framed.send(RespValue::Array(response)).await).is_err() {
         return Ok(()); // client disconnected immediately
     }
     Ok(())

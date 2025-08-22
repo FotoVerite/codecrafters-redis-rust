@@ -30,7 +30,7 @@ impl RdbConfig {
             // print a hex offset
             eprint!("{:08X}: ", i * 16);
             for byte in chunk {
-                eprint!("{:02X} ", byte);
+                eprint!("{byte:02X} ");
             }
             eprintln!();
         }
@@ -83,7 +83,7 @@ impl RdbConfig {
                         _ => {
                             return Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
-                                format!("invalid type {}", type_code),
+                                format!("invalid type {type_code}"),
                             ));
                         }
                     };
@@ -104,8 +104,7 @@ impl RdbConfig {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
-                            "Unexpected opcode (really a length prefix) 0x{:02X}",
-                            opcode
+                            "Unexpected opcode (really a length prefix) 0x{opcode:02X}"
                         ),
                     ));
                 }
@@ -149,7 +148,7 @@ fn _peek_bytes<R: Read>(reader: &mut BufReader<R>, n: usize) -> std::io::Result<
     let buf = reader.fill_buf()?; // Get a slice to the currently buffered bytes
 
     let to_show = &buf[..std::cmp::min(n, buf.len())];
-    println!("Peeked bytes: {:02X?}", to_show);
+    println!("Peeked bytes: {to_show:02X?}");
 
     // Do NOT consume yet, so bytes remain in buffer for next reads.
 

@@ -20,13 +20,13 @@ impl ReplicationManager {
 
     pub async fn add_replica(
         &mut self,
-        addr: &String,
+        addr: &str,
         socket: SocketAddr,
         writer: OwnedWriteHalf,
     ) -> io::Result<()> {
 
         let replica = Replica::new(socket, writer);
-        self.replicas.lock().await.insert(addr.clone(), replica);
+        self.replicas.lock().await.insert(addr.to_string(), replica);
         Ok(())
     }
 

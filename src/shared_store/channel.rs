@@ -28,11 +28,8 @@ impl Store {
         let channel_name = format!("channel-{channel_name}");
         let mut keyspace = self.keyspace.write().await;
         if let Some(entry) = keyspace.get_mut(&channel_name) {
-            match &mut entry.value {
-                RedisValue::Channel(channel) => {
-                    channel.clients.insert(client, tx);
-                }
-                _ => {}
+            if let RedisValue::Channel(channel) = &mut entry.value {
+                channel.clients.insert(client, tx);
             }
         } else {
             let mut channel = Channel::new(channel_name.clone());
@@ -54,11 +51,12 @@ impl Store {
             match &mut entry.value {
                 RedisValue::Channel(channel) => {
                     let size = channel.clients.len();
-                    for (_, tx) in &channel.clients {
-                        let mut response = vec![];
-                        response.push(RespValue::BulkString(Some("message".into())));
-                        response.push(RespValue::BulkString(Some(called_name.clone().into())));
-                        response.push(RespValue::BulkString(Some(msg.clone().into())));
+                    for tx in channel.clients.values() {
+                        let response = vec![
+                            RespValue::BulkString(Some("message".into())),
+                            RespValue::BulkString(Some(called_name.clone().into())),
+                            RespValue::BulkString(Some(msg.clone().into())),
+                        ];
                         tx.send(RespValue::Array(response)).await?;
                     }
                     Ok(size)

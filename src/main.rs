@@ -7,6 +7,7 @@ mod replication_manager;
 mod resp;
 mod server_info;
 mod shared_store;
+mod server_context;
 
 use std::{
     sync::Arc,
@@ -87,23 +88,27 @@ async fn run_master(
 
     loop {
         let (socket, addr) = listener.accept().await?;
-        println!("New connection from {}", addr);
+        println!("New connection from {addr}");
         let store_clone = store.clone();
         let rdb_clone = rdb.clone();
         let info_clone = server_info.clone();
         let replication_manager_clone = replication_manager.clone();
 
+        let server_context = server_context::ServerContext::new(
+            store_clone,
+            rdb_clone,
+            replication_manager_clone,
+            info_clone,
+        );
+
         tokio::spawn(async move {
             if let Err(e) = handle_master_connection(
                 socket,
-                store_clone,
-                rdb_clone,
-                replication_manager_clone,
-                info_clone,
+                server_context,
             )
             .await
             {
-                eprintln!("Error handling {}: {:?}", addr, e);
+                eprintln!("Error handling {addr}: {e:?}");
             }
         });
     }
@@ -131,13 +136,13 @@ async fn run_slave(server_info: Arc<ServerInfo>, store: Arc<Store>) -> Result<()
                 );
             }
             Ok(None) => eprintln!("Handshake returned Ok(None) - no socket available."),
-            Err(e) => eprintln!("Handshake with master failed with error: {:?}", e),
+            Err(e) => eprintln!("Handshake with master failed with error: {e:?}"),
         }
     });
 
     loop {
         let (socket, addr) = listener.accept().await?;
-        println!("New connection from {}", addr);
+        println!("New connection from {addr}");
         let store_clone = store.clone();
         let info_clone = server_info.clone();
 
@@ -146,7 +151,7 @@ async fn run_slave(server_info: Arc<ServerInfo>, store: Arc<Store>) -> Result<()
             if let Err(e) =
                 handle_replication_connection(&mut framed, store_clone, info_clone).await
             {
-                eprintln!("Error handling {}: {:?}", addr, e);
+                eprintln!("Error handling {addr}: {e:?}");
             }
         });
     }

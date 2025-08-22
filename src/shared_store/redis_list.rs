@@ -26,7 +26,7 @@ impl List {
     }
 
     pub fn lpush(&mut self, mut values: Vec<Vec<u8>>) -> io::Result<usize> {
-        values.extend(self.entries.drain(..));
+        values.append(&mut self.entries);
         self.entries = values.clone();
         self.notify.notify_waiters();
         Ok(self.entries.len())

@@ -21,7 +21,7 @@ impl StreamID {
     }
 
     pub fn from_redis_input(previous: Option<StreamID>, given: String) -> io::Result<Self> {
-        Ok(Self::generate(previous, given)?)
+        Self::generate(previous, given)
     }
 
     pub fn generate(previous: Option<StreamID>, given: String) -> io::Result<Self> {

@@ -40,7 +40,7 @@ pub fn encode_stream(resp: Vec<(StreamID, StreamEntry)>) -> Vec<RespValue> {
 
 async fn poll_xread(
     store: &Arc<Store>,
-    keys: &Vec<String>,
+    keys: &[String],
     ids: &[StreamID],
 ) -> io::Result<Vec<RespValue>> {
     let mut outer = vec![];
@@ -57,8 +57,8 @@ async fn poll_xread(
 
 async fn try_poll_xread(
     store: &Arc<Store>,
-    keys: &Vec<String>,
-    ids: &Vec<StreamID>,
+    keys: &[String],
+    ids: &[StreamID],
 ) -> io::Result<Option<RespValue>> {
     let result = poll_xread(store, keys, ids).await?;
     if result.is_empty() {
@@ -69,9 +69,9 @@ async fn try_poll_xread(
 }
 async fn wait_with_timeout(
     store: &Arc<Store>,
-    keys: &Vec<String>,
-    ids: &Vec<StreamID>,
-    notifiers: &Vec<Arc<Notify>>,
+    keys: &[String],
+    ids: &[StreamID],
+    notifiers: &[Arc<Notify>],
     timeout_ms: u64,
 ) -> io::Result<Option<RespValue>> {
     let timeout = Duration::from_millis(timeout_ms);
@@ -92,9 +92,9 @@ async fn wait_with_timeout(
 
 async fn wait_forever(
     store: &Arc<Store>,
-    keys: &Vec<String>,
-    ids: &Vec<StreamID>,
-    notifiers: &Vec<Arc<Notify>>,
+    keys: &[String],
+    ids: &[StreamID],
+    notifiers: &[Arc<Notify>],
 ) -> io::Result<Option<RespValue>> {
     println!("Waiting Forever .");
 
@@ -121,8 +121,8 @@ async fn wait_forever(
 pub async fn xread_command(
     store: &Arc<Store>,
     block: &Option<u64>,
-    keys: &Vec<String>,
-    ids: &Vec<String>,
+    keys: &[String],
+    ids: &[String],
 ) -> io::Result<Option<RespValue>> {
     let ids = store.resolve_stream_ids(keys, ids).await?;
     // First, check if any stream already has entries

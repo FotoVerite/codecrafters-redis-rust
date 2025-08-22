@@ -27,6 +27,6 @@ pub fn setup_master_listener(framed: ArcFrame, store: Arc<Store>, info: Arc<Serv
 
         handle_replication_connection(&mut guard, store, info)
             .await
-            .map_err(|e| invalid_data_err(format!("Replication Listener had error, {}", e)))
+            .map_err(|e| invalid_data_err(format!("Replication Listener had error, {e}")))
     });
 }

@@ -86,8 +86,11 @@ pub enum RespCommand {
     },
 
     Unsubscribe(String),
+    #[allow(dead_code)]
     PSubscribe,
+    #[allow(dead_code)]
     PunSubscribe,
+    #[allow(dead_code)]
     Quit,
 
     Zadd(String, f64, String),
@@ -109,7 +112,7 @@ impl fmt::Display for RespCommand {
             RespCommand::Set { .. } => write!(f, "SET"),
             RespCommand::Get { .. } => write!(f, "get"),
             // …add others as needed…
-            _ => write!(f, "{:?}", self), // fallback to Debug
+            _ => write!(f, "{self:?}"), // fallback to Debug
         }
     }
 }
@@ -131,7 +134,7 @@ pub struct Command {
 
 impl Command {
     pub fn new(input: Vec<RespValue>) -> Result<Self, io::Error> {
-        if let Some(resp_value) = input.get(0) {
+        if let Some(resp_value) = input.first() {
             let name = match resp_value {
                 RespValue::SimpleString(s) => s.clone(),
                 RespValue::BulkString(s) => convert_bulk_string(s.to_owned())?,
@@ -147,7 +150,7 @@ impl Command {
                 };
                 args.push(s);
             }
-            return Ok(Self { name, args });
+            Ok(Self { name, args })
         } else {
             invalid_data("Unexpected RespValue")?
         }
@@ -205,7 +208,7 @@ impl Command {
 
                     "zrem" => parse_zrem(command),
 
-                    other => invalid_data(format!("Unexpected Command: {}", other)),
+                    other => invalid_data(format!("Unexpected Command: {other}")),
                 }
             }
             _ => Err(io::Error::new(
@@ -329,7 +332,7 @@ fn parse_xread(command: Command) -> Result<RespCommand, io::Error> {
             &command.args[pos + 1..command.args.len()],
         )
     };
-    let mut optional_iter = optional.into_iter();
+    let mut optional_iter = optional.iter();
     let mut block = None;
     let mut count = None;
     while let Some(arg) = optional_iter.next() {
@@ -396,25 +399,22 @@ fn parse_set(command: Command) -> Result<RespCommand, io::Error> {
     let mut px = None;
     let mut optional_args = command.args.iter().skip(2);
     while let Some(arg) = optional_args.next() {
-        match arg.to_lowercase().as_str() {
-            "px" => {
-                if let Some(px_value) = optional_args.next() {
-                    match px_value.parse::<u64>() {
-                        Ok(val) => px = Some(val),
-                        Err(_) => return invalid_data("PX value must be a positive integer"),
-                    }
-                } else {
-                    return invalid_data("PX value must be a positive integer");
+        if arg.to_lowercase().as_str() == "px" {
+            if let Some(px_value) = optional_args.next() {
+                match px_value.parse::<u64>() {
+                    Ok(val) => px = Some(val),
+                    Err(_) => return invalid_data("PX value must be a positive integer"),
                 }
+            } else {
+                return invalid_data("PX value must be a positive integer");
             }
-            _ => {}
         }
     }
     Ok(RespCommand::Set { key, value, px })
 }
 
 fn parse_replconf(command: Command) -> io::Result<RespCommand> {
-    let Some(action) = command.args.get(0) else {
+    let Some(action) = command.args.first() else {
         return invalid_data("Missing Replconf action");
     };
     match action.to_ascii_lowercase().as_str() {
@@ -460,7 +460,7 @@ fn parse_replconf(command: Command) -> io::Result<RespCommand> {
 }
 
 fn parse_config(command: Command) -> Result<RespCommand, io::Error> {
-    let Some(action) = command.args.get(0) else {
+    let Some(action) = command.args.first() else {
         return invalid_data("Missing CONFIG action");
     };
 
@@ -478,7 +478,7 @@ fn parse_config(command: Command) -> Result<RespCommand, io::Error> {
 
 fn parse_psync(command: Command) -> Result<RespCommand, io::Error> {
     if command.args.len() < 2 {
-        return invalid_data("Unknown CONFIG action");
+        invalid_data("Unknown CONFIG action")
     } else {
         let pos = command.args[1]
             .parse::<i64>()

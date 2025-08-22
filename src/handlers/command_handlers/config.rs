@@ -9,9 +9,10 @@ pub fn config_command(command: ConfigCommand, rdb: Arc<RdbConfig>) -> RespValue 
     match command {
         ConfigCommand::Get(key) => {
             if let Some(resp) = rdb.get(key.as_str()) {
-                let mut vec = vec![];
-                vec.push(RespValue::BulkString(Some(key.into_bytes())));
-                vec.push(RespValue::BulkString(Some(resp.into_bytes())));
+                let vec = vec![
+                    RespValue::BulkString(Some(key.into_bytes())),
+                    RespValue::BulkString(Some(resp.into_bytes())),
+                ];
                 RespValue::Array(vec)
             } else {
                 RespValue::BulkString(None)

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ordered_float::OrderedFloat;
 
@@ -93,11 +93,11 @@ impl Store {
     }
 
     pub async fn zrange(&self, key: String, start: i64, stop: i64) -> anyhow::Result<Vec<String>> {
-        let mut keyspace = self.keyspace.read().await;
+        let keyspace = self.keyspace.read().await;
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {
                 RedisValue::ZRank(zrank) => {
-                    let mut members: Vec<String> = zrank
+                    let members: Vec<String> = zrank
                         .data
                         .iter()
                         .flat_map(|(_, set)| {
@@ -134,12 +134,12 @@ impl Store {
     }
 
     pub async fn zcard(&self, key: String) -> anyhow::Result<i64> {
-        let mut keyspace = self.keyspace.read().await;
+        let keyspace = self.keyspace.read().await;
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {
                 RedisValue::ZRank(zrank) => {
                     let mut ret = 0;
-                    for (_, entries) in &zrank.data {
+                    for entries in zrank.data.values() {
                         ret += entries.len();
                     }
                     return Ok(ret as i64);
@@ -151,7 +151,7 @@ impl Store {
     }
 
     pub async fn zscore(&self, key: String, value: String) -> anyhow::Result<Option<f64>> {
-        let mut keyspace = self.keyspace.read().await;
+        let keyspace = self.keyspace.read().await;
         if let Some(entry) = keyspace.get(&key) {
             match &entry.value {
                 RedisValue::ZRank(zrank) => {
@@ -186,11 +186,7 @@ impl Store {
 fn normalize_index(idx: i64, len: usize) -> usize {
     if idx < 0 {
         let abs = (-idx) as usize;
-        if abs > len {
-            0
-        } else {
-            len - abs
-        }
+        len.saturating_sub(abs)
     } else if idx as usize >= len {
         len
     } else {
