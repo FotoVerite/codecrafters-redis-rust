@@ -2,7 +2,11 @@ use std::{collections::HashMap, net::SocketAddr};
 
 use tokio::sync::mpsc::Sender;
 
-use crate::{handlers::client, resp::RespValue, shared_store::shared_store::{Entry, RedisValue, Store}};
+use crate::{
+    handlers::client,
+    resp::RespValue,
+    shared_store::shared_store::{Entry, RedisValue, Store},
+};
 
 #[derive(Debug, Clone)]
 pub struct Channel {
@@ -21,12 +25,7 @@ impl Channel {
 }
 
 impl Store {
-    pub async fn subscribe(
-        &self,
-        channel_name: String,
-        client: SocketAddr,
-        tx: Sender<RespValue>,
-    ) {
+    pub async fn subscribe(&self, channel_name: String, client: SocketAddr, tx: Sender<RespValue>) {
         let channel_name = format!("channel-{channel_name}");
         let mut keyspace = self.keyspace.write().await;
         if let Some(entry) = keyspace.get_mut(&channel_name) {
@@ -56,14 +55,18 @@ impl Store {
                 RedisValue::Channel(channel) => {
                     let size = channel.clients.len();
                     for (_, tx) in &channel.clients {
-                        tx.send(RespValue::SimpleString(msg.clone().into()));
+                        let mut response = vec![];
+                        response.push(RespValue::BulkString(Some("message".into())));
+                        response.push(RespValue::BulkString(Some(channel_name.clone().into())));
+                        response.push(RespValue::BulkString(Some(msg.clone().into())));
+                        tx.send(RespValue::Array(response)).await?;
                     }
                     Ok(size)
                 }
-                _ => {Ok(0)}
+                _ => Ok(0),
             }
         } else {
-           Ok(0)
+            Ok(0)
         }
     }
 }
