@@ -48,6 +48,7 @@ impl Store {
         channel_name: String,
         msg: String,
     ) -> anyhow::Result<usize> {
+        let called_name = channel_name.clone()
         let channel_name = format!("channel-{channel_name}");
         let mut keyspace = self.keyspace.write().await;
         if let Some(entry) = keyspace.get_mut(&channel_name) {
@@ -57,7 +58,7 @@ impl Store {
                     for (_, tx) in &channel.clients {
                         let mut response = vec![];
                         response.push(RespValue::BulkString(Some("message".into())));
-                        response.push(RespValue::BulkString(Some(channel_name.clone().into())));
+                        response.push(RespValue::BulkString(Some(called_name.clone().into())));
                         response.push(RespValue::BulkString(Some(msg.clone().into())));
                         tx.send(RespValue::Array(response)).await?;
                     }
