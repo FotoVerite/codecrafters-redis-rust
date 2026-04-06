@@ -10,6 +10,7 @@ use crate::{
             list::{self},
             psync, set, stream, type_command, wait, xadd, xrange,
         },
+        geo::{encode_geo},
         replication::handle_replconf_command,
         session::Session,
     },
@@ -211,15 +212,17 @@ async fn process_command(
         }
         RespCommand::Geoadd {
             key,
-            lat,
             long,
+            lat,
             member,
         } => {
-            if lat > 180.00 || lat < -180.00 || long > 85.05112878 || long < -85.05112878 {
-                let err = format!("ERR invalid longitude,latitude pair {}, {}", lat, long);
+            if long > 180.00 || long < -180.00 || lat > 85.05112878 || lat < -85.05112878 {
+                let err = format!("ERR invalid longitude,latitude pair {}, {}", long, lat);
                 Some(RespValue::Error(err))
             } else {
-                let result = context.store.zadd(key, 0.0, member).await?;
+                let encoded = encode_geo(long, lat);
+                println!("{} {}", encoded, encoded as f64);
+                let result = context.store.zadd(key, encoded as f64, member).await?;
                 Some(RespValue::Integer(result))
             }
         }

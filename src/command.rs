@@ -95,8 +95,8 @@ pub enum RespCommand {
 
     Geoadd {
         key: String, 
-        lat: f64,
         long: f64,
+        lat: f64,
         member: String,
     },
     Zadd(String, f64, String),
@@ -253,8 +253,8 @@ fn parse_geoadd(command: Command) -> io::Result<RespCommand> {
         return Err(invalid_data_err("Unable to parse args"));
     }
     let key = command.args[0].clone();
-    let lat = command.args[1].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
-    let long = command.args[2].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
+    let long = command.args[1].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
+    let lat = command.args[2].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
     let member  = command.args[3].clone();
 
     Ok(RespCommand::Geoadd {key, lat, long, member})

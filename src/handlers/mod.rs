@@ -7,3 +7,4 @@ pub mod session;
 pub mod slave;
 pub mod utils;
 pub mod client;
+pub mod geo;
