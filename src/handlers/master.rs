@@ -229,7 +229,15 @@ async fn process_command(
             let amount = context.store.send_to_channel(channel, msg).await?;
             Some(RespValue::Integer(amount as i64))
         }
-        RespCommand::Geoadd {..} => Some(RespValue::Integer(1)),
+        RespCommand::Geoadd {lat, long, ..} => {
+            if lat > 180.00 || lat < -180.00 || long > 85.05112878 || long < -85.05112878 {
+                let err = format!("ERR invalid longitude,latitude pair {}, {}", lat, long);
+                Some(RespValue::Error(err))
+            } 
+            else {
+            Some(RespValue::Integer(1))
+            }
+        },
 
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
