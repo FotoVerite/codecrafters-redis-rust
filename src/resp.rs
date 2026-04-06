@@ -10,6 +10,7 @@ pub enum RespValue {
     BulkString(Option<Vec<u8>>),
     RDB(Option<Vec<u8>>), // None = $-1 // None = $-1
     Array(Vec<RespValue>),
+    NullArray,
 }
 
 pub struct RespCodec;
@@ -126,6 +127,9 @@ impl RespCodec {
     pub fn parse_array(&mut self, src: &mut BytesMut) -> Result<Option<RespValue>, io::Error> {
         if let Some(size_string) = parse_resp_line(src)? {
             let size = parse_integer(size_string.as_str())?;
+            if size == -1 {
+                return Ok(Some(RespValue::NullArray));
+            }
             let mut ret = Vec::with_capacity(size as usize);
             for _ in 0..size {
                 if let Some((val, _)) = self.decode(src)? {
@@ -185,6 +189,10 @@ impl Encoder<RespValue> for RespCodec {
             RespValue::Integer(i) => write_line(dst, b':', (i.to_string()).as_str()),
             RespValue::BulkString(c) => write_bulk_string(dst, c),
             RespValue::Array(values) => self.write_array(dst, values),
+            RespValue::NullArray => {
+                dst.extend_from_slice(b"*-1\r\n");
+                Ok(())
+            }
             RespValue::RDB(_) => Ok(()),
         }
     }

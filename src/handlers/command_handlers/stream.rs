@@ -85,7 +85,7 @@ async fn wait_with_timeout(
             try_poll_xread(store, keys, ids).await
         }
         _ = tokio::time::sleep(timeout) => {
-            Ok(Some(RespValue::BulkString(None)))
+            Ok(Some(RespValue::NullArray))
         }
     }
 }

@@ -210,7 +210,7 @@ async fn handle_multi_mode(
             session.queued.push((command, bytes));
             client
                 .framed
-                .send(RespValue::BulkString(Some("QUEUED".into())))
+                .send(RespValue::SimpleString("QUEUED".into()))
                 .await?;
         }
     }
@@ -229,6 +229,7 @@ async fn process_command(
             let amount = context.store.send_to_channel(channel, msg).await?;
             Some(RespValue::Integer(amount as i64))
         }
+        RespCommand::Geoadd {..} => Some(RespValue::Integer(1)),
 
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),

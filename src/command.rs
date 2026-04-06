@@ -93,6 +93,12 @@ pub enum RespCommand {
     #[allow(dead_code)]
     Quit,
 
+    Geoadd {
+        key: String, 
+        lat: f64,
+        long: f64,
+        member: String,
+    },
     Zadd(String, f64, String),
     Zcard(String),
     Zrange(String, i64, i64),
@@ -193,6 +199,7 @@ impl Command {
                         command.args[0].clone(),
                         command.args[1].clone(),
                     )),
+                    "geoadd" => parse_geoadd(command),
                     "xadd" => parse_xadd(command),
                     "xrange" => parse_xrange(command),
                     "xread" => parse_xread(command),
@@ -239,6 +246,18 @@ fn parse_zadd(command: Command) -> io::Result<RespCommand> {
         .parse::<f64>()
         .map_err(|_| invalid_data_err("Unable to parse param"))?;
     Ok(RespCommand::Zadd(key, rank, command.args[2].clone()))
+}
+
+fn parse_geoadd(command: Command) -> io::Result<RespCommand> {
+    if command.args.len() != 4 {
+        return Err(invalid_data_err("Unable to parse args"));
+    }
+    let key = command.args[0].clone();
+    let lat = command.args[1].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
+    let long = command.args[2].parse::<f64>().map_err(|_| invalid_data_err("Unable to parse param"))?;
+    let member  = command.args[3].clone();
+
+    Ok(RespCommand::Geoadd {key, lat, long, member})
 }
 
 fn parse_zrank(command: Command) -> io::Result<RespCommand> {

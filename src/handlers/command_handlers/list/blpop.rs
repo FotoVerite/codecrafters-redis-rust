@@ -40,7 +40,7 @@ async fn wait_with_timeout(
             try_poll_lpop(store, keys).await
         }
         _ = tokio::time::sleep(timeout) => {
-            Ok(Some(RespValue::BulkString(None))) // $-1\r\n for timeout
+            Ok(Some(RespValue::NullArray)) // *-1\r\n for timeout
         }
     }
 }
