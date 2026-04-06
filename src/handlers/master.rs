@@ -1,7 +1,5 @@
 use futures::{SinkExt, StreamExt};
-use tokio::{
-    net::TcpStream,
-};
+use tokio::net::TcpStream;
 
 use crate::{
     command::{self, RespCommand},
@@ -45,27 +43,13 @@ pub async fn handle_master_connection(
 
         match client.mode {
             ClientMode::Normal => {
-                handle_normal_mode(
-                    &mut client,
-                    &mut session,
-                    command,
-                    bytes,
-                    &context,
-                )
-                .await?;
+                handle_normal_mode(&mut client, &mut session, command, bytes, &context).await?;
             }
             ClientMode::Subscribed => {
                 handle_subscribed_mode(&mut client, command, &context).await?;
             }
             ClientMode::Multi => {
-                handle_multi_mode(
-                    &mut client,
-                    &mut session,
-                    command,
-                    bytes,
-                    &context,
-                )
-                .await?;
+                handle_multi_mode(&mut client, &mut session, command, bytes, &context).await?;
             }
         }
     }
@@ -94,13 +78,9 @@ async fn handle_normal_mode(
                 .await?;
         }
         _ => {
-            let response = process_command(
-                context,
-                command,
-                bytes,
-                &mut Some(client.addr.to_string()),
-            )
-            .await?;
+            let response =
+                process_command(context, command, bytes, &mut Some(client.addr.to_string()))
+                    .await?;
             if let Some(response) = response {
                 client.framed.send(response).await?;
             }
@@ -229,15 +209,20 @@ async fn process_command(
             let amount = context.store.send_to_channel(channel, msg).await?;
             Some(RespValue::Integer(amount as i64))
         }
-        RespCommand::Geoadd {lat, long, ..} => {
+        RespCommand::Geoadd {
+            key,
+            lat,
+            long,
+            member,
+        } => {
             if lat > 180.00 || lat < -180.00 || long > 85.05112878 || long < -85.05112878 {
                 let err = format!("ERR invalid longitude,latitude pair {}, {}", lat, long);
                 Some(RespValue::Error(err))
-            } 
-            else {
-            Some(RespValue::Integer(1))
+            } else {
+                let result = context.store.zadd(key, 0.0, member).await?;
+                Some(RespValue::Integer(result))
             }
-        },
+        }
 
         RespCommand::Echo(s) => Some(RespValue::BulkString(Some(s.into_bytes()))),
         RespCommand::Exec => Some(RespValue::Error("ERR EXEC without MULTI".into())),
@@ -248,9 +233,15 @@ async fn process_command(
 
         RespCommand::Llen(key) => list::llen(context.store.clone(), key).await?,
         RespCommand::Lpop(key, amount) => list::lpop(context.store.clone(), key, amount).await?,
-        RespCommand::Lpush { key, values } => list::lpush(context.store.clone(), key, values).await?,
-        RespCommand::Rpush { key, values } => list::rpush(context.store.clone(), key, values).await?,
-        RespCommand::Lrange { key, start, end } => list::lrange(context.store.clone(), key, start, end).await?,
+        RespCommand::Lpush { key, values } => {
+            list::lpush(context.store.clone(), key, values).await?
+        }
+        RespCommand::Rpush { key, values } => {
+            list::rpush(context.store.clone(), key, values).await?
+        }
+        RespCommand::Lrange { key, start, end } => {
+            list::lrange(context.store.clone(), key, start, end).await?
+        }
 
         RespCommand::Zadd(key, rank, value) => {
             let result = context.store.zadd(key, rank, value).await?;
@@ -284,7 +275,7 @@ async fn process_command(
                 Some(RespValue::BulkString(None))
             }
         }
-         RespCommand::ZRem(key, value) => {
+        RespCommand::ZRem(key, value) => {
             let result = context.store.zrem(key, value).await?;
             if let Some(result) = result {
                 Some(RespValue::Integer(result))
@@ -301,8 +292,12 @@ async fn process_command(
         }
 
         RespCommand::Type(key) => type_command::type_command(&context.store, key).await?,
-        RespCommand::ConfigCommand(command) => Some(config::config_command(command, context.rdb.clone())),
-        RespCommand::Keys(string) => Some(super::keys::keys_command(string, context.store.clone()).await),
+        RespCommand::ConfigCommand(command) => {
+            Some(config::config_command(command, context.rdb.clone()))
+        }
+        RespCommand::Keys(string) => {
+            Some(super::keys::keys_command(string, context.store.clone()).await)
+        }
         RespCommand::Info(string) => Some(super::info::info_command(string, context.info.clone())),
         RespCommand::ReplconfCommand(command) => {
             let mut p_addr = peer_addr.clone();
@@ -312,7 +307,13 @@ async fn process_command(
         }
         RespCommand::RDB(_) => None,
         RespCommand::Wait(required_replicas, timeout_ms) => {
-            wait::wait_command(&context.store, &context.manager, required_replicas, timeout_ms).await?
+            wait::wait_command(
+                &context.store,
+                &context.manager,
+                required_replicas,
+                timeout_ms,
+            )
+            .await?
         }
 
         RespCommand::Xadd { key, id, fields } => {
@@ -365,7 +366,8 @@ async fn subscribe_to_channel(
     channel_name: String,
     client: &mut Client,
 ) -> anyhow::Result<()> {
-    context.store
+    context
+        .store
         .subscribe(channel_name.clone(), client.addr, client.tx.clone())
         .await;
     client.channels.push(channel_name.clone());
@@ -385,7 +387,10 @@ async fn unsubscribe_from_channel(
     channel_name: String,
     client: &mut Client,
 ) -> anyhow::Result<()> {
-    _ = context.store.unsubscribe(channel_name.clone(), client.addr).await;
+    _ = context
+        .store
+        .unsubscribe(channel_name.clone(), client.addr)
+        .await;
     client.channels.pop();
     let response = vec![
         RespValue::BulkString(Some("unsubscribe".into())),
